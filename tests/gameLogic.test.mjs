@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyModifier, nextState, makeLevel, scoreRun } from '../dist/js/gameLogic.js';
+import { applyModifier, nextState, makeLevel, scoreRun, impactRemovalIndices } from '../dist/js/gameLogic.js';
 
 test('gate modifiers are whole, nonnegative, and capped', () => {
   assert.equal(applyModifier(12, { op: '+', value: 25 }), 37);
@@ -29,4 +29,10 @@ test('score rewards destruction and combos', () => {
   const low = scoreRun({ balls: 20, destroyed: 20, combo: 1, level: 1 });
   const high = scoreRun({ balls: 20, destroyed: 90, combo: 6, level: 1 });
   assert.ok(high > low);
+});
+
+test('obstacle damage removes balls nearest the physical impact', () => {
+  const points = [{ x: -2, z: 0 }, { x: -1, z: -.5 }, { x: 1, z: 0 }, { x: 2, z: -.5 }];
+  assert.deepEqual(impactRemovalIndices(points, { x: -1.8, z: -.4 }, 2), [0, 1]);
+  assert.deepEqual(impactRemovalIndices(points, { x: 1.8, z: -.4 }, 2), [3, 2]);
 });

@@ -24,6 +24,18 @@ export function coinsFor({ destroyed, score }) {
   return Math.max(5, Math.floor(destroyed * 0.7 + score / 900));
 }
 
+export function impactRemovalIndices(points, impact, amount) {
+  const take = Math.max(0, Math.min(points.length, Math.floor(amount)));
+  return points
+    .map((point, index) => ({
+      index,
+      distance: (point.x - impact.x) ** 2 + (point.z - impact.z) ** 2 * 0.7
+    }))
+    .sort((a, b) => a.distance - b.distance || a.index - b.index)
+    .slice(0, take)
+    .map(item => item.index);
+}
+
 export function nextState(state, event) {
   const map = {
     menu: { PLAY: 'running', SHOP: 'shop' },

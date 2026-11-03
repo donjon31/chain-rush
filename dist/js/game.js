@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { applyModifier, modifierLabel, makeLevel, scoreRun, coinsFor, nextState, COSMETICS, MAX_BALLS } from './gameLogic.js';
+import { applyModifier, modifierLabel, makeLevel, scoreRun, coinsFor, nextState, impactRemovalIndices, COSMETICS, MAX_BALLS } from './gameLogic.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -46,6 +46,7 @@ const world = new THREE.Group(); scene.add(world);
 const deco = new THREE.Group(); scene.add(deco);
 let state = 'menu', levelData, runGroup, towerGroup, gateObjects = [], obstacleObjects = [], blocks = [], shots = [], particles = [];
 let ballCount = 12, runZ = 0, targetX = 0, groupX = 0, fired = false, finishTimer = 0, destroyed = 0, combo = 0, maxCombo = 0, lastDestroyAt = 0, shake = 0, levelStartBalls = 0;
+let ballMembers = [];
 let pointer = { down: false, x: 0, y: 0, startX: 0, startY: 0, aimX: 0, aimY: .18 };
 const clock = new THREE.Clock();
 
@@ -150,33 +151,53 @@ function createTower() {
 
 function createLevel(level, replay = false) {
   clearGroup(runGroup); clearGroup(towerGroup); runGroup = new THREE.Group(); world.add(runGroup); gateObjects = []; obstacleObjects = []; shots = []; particles = [];
-  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = 0;
+  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = 0;
   createTrack(); levelData.gates.forEach(createGate); levelData.obstacles.forEach(createObstacle); createTower();
   runGroup.add(ballMesh); cosmeticMaterial(); updateBallInstances(0); setState('running'); updateHud();
   camera.position.set(0, 8.7, 14); camera.lookAt(0, 0, -8); track('level_start', { level, replay });
 }
 
+function makeFormation(count) {
+  const spread = Math.min(3.35, .65 + Math.sqrt(count) * .18);
+  return Array.from({ length: count }, (_, i) => {
+    const r = Math.sqrt(i / Math.max(1, count)) * spread, a = i * 2.399963;
+    return { x: Math.cos(a) * r, z: Math.sin(a) * r * .72, phase: i * .7 };
+  });
+}
+
+function resetBallFormation(count) {
+  ballMembers = makeFormation(Math.max(1, Math.min(MAX_BALLS, count)));
+  ballCount = ballMembers.length;
+}
+
 function updateBallInstances(time) {
-  ballMesh.count = ballCount; const spread = Math.min(3.35, .65 + Math.sqrt(ballCount) * .18);
-  for (let i = 0; i < ballCount; i++) {
-    const r = Math.sqrt(i / Math.max(1, ballCount)) * spread; const a = i * 2.399963;
-    const x = groupX + Math.cos(a) * r, z = runZ + Math.sin(a) * r * .72;
-    dummy.position.set(x, .18 + Math.sin(time * 6 + i * .7) * .055, z); const s = .92 + (i % 7) * .012; dummy.scale.setScalar(s); dummy.rotation.set(time + i, time * .7 + i, 0); dummy.updateMatrix(); ballMesh.setMatrixAt(i, dummy.matrix);
+  ballMesh.count = ballMembers.length;
+  for (let i = 0; i < ballMembers.length; i++) {
+    const member = ballMembers[i], x = groupX + member.x, z = runZ + member.z;
+    dummy.position.set(x, .18 + Math.sin(time * 6 + member.phase) * .055, z); const s = .92 + (i % 7) * .012; dummy.scale.setScalar(s); dummy.rotation.set(time + i, time * .7 + i, 0); dummy.updateMatrix(); ballMesh.setMatrixAt(i, dummy.matrix);
     if (save.selected === 'rainbow') ballMesh.setColorAt(i, new THREE.Color().setHSL((i / Math.max(1, ballCount) + time * .08) % 1, .82, .6));
   }
   ballMesh.instanceMatrix.needsUpdate = true; if (ballMesh.instanceColor) ballMesh.instanceColor.needsUpdate = true;
 }
 
 function modifyBalls(mod, worldPos) {
-  const before = ballCount; ballCount = applyModifier(ballCount, mod); const diff = ballCount - before;
+  const before = ballCount; const next = applyModifier(ballCount, mod); const diff = next - before; resetBallFormation(Math.max(1, next));
   showToast(`${diff >= 0 ? '+' : ''}${diff}`, diff >= 0); burst(worldPos, diff >= 0 ? 0x54ffe0 : 0xff3b6f, Math.min(22, Math.abs(diff) + 6));
   sound(diff >= 0 ? 'gate' : 'hit'); haptic(diff >= 0 ? 24 : [35, 30, 35]); $('#ball-badge').classList.add('pop'); setTimeout(() => $('#ball-badge').classList.remove('pop'), 180); updateHud();
-  if (ballCount <= 0) { ballCount = 1; showToast('LAST CHANCE!', false); }
+  if (next <= 0) showToast('LAST CHANCE!', false);
 }
 
-function obstacleHit(ob) {
-  if (ob.userData.hit) return; ob.userData.hit = true; const loss = Math.max(2, Math.floor(ballCount * (.12 + levelData.level * .006))); ballCount = Math.max(1, ballCount - loss);
-  showToast(`-${loss}`, false); burst(new THREE.Vector3(groupX, .4, runZ), 0xff315f, 18); sound('hit'); haptic([45, 25, 35]); shake = .35; updateHud();
+function obstacleHit(ob, impactWorldX) {
+  if (ob.userData.hit) return; ob.userData.hit = true;
+  const requested = Math.max(2, Math.floor(ballCount * (.12 + levelData.level * .006))), loss = Math.min(requested, ballCount - 1);
+  const impact = { x: impactWorldX - groupX, z: -.72 };
+  const removedSet = new Set(impactRemovalIndices(ballMembers, impact, loss));
+  const removed = ballMembers.filter((_, index) => removedSet.has(index));
+  ballMembers = ballMembers.filter((_, index) => !removedSet.has(index)); ballCount = ballMembers.length;
+  removed.forEach((member, i) => {
+    const mesh = new THREE.Mesh(ballGeo, ballMesh.material); mesh.position.set(groupX + member.x, .25, runZ + member.z); mesh.userData.vel = new THREE.Vector3((member.x - impact.x) * 2.5 + (Math.random() - .5) * 2, 2.8 + Math.random() * 2.5, 2 + Math.random() * 2); mesh.userData.life = .65 + Math.random() * .35; mesh.scale.setScalar(.9); world.add(mesh); particles.push(mesh);
+  });
+  showToast(`-${loss}`, false); burst(new THREE.Vector3(impactWorldX, .4, runZ - .7), 0xff315f, 10); sound('hit'); haptic([45, 25, 35]); shake = .35; updateHud();
 }
 
 function updateRun(dt, t) {
@@ -190,10 +211,16 @@ function updateRun(dt, t) {
     const d = ob.userData; if (d.type === 'spinner') ob.rotation.y += dt * d.speed * 2.5;
     if (d.type === 'block') ob.children[0].position.x = d.x + Math.sin(t * d.speed) * 1.5;
     if (Math.abs(runZ - ob.position.z) < 1.3) {
-      if (d.type === 'spinner' && Math.abs(Math.sin(ob.rotation.y) * 3.8 - groupX) < 1.2) obstacleHit(ob);
-      if (d.type === 'block' && Math.abs(ob.children[0].position.x - groupX) < 1.55) obstacleHit(ob);
-      if (d.type === 'zone' && Math.abs(d.x - groupX) < 1.85) obstacleHit(ob);
-      if (d.type === 'gap' && Math.abs(groupX) > 2.05) obstacleHit(ob);
+      const touchesX = (x, radius) => ballMembers.some(member => Math.abs(groupX + member.x - x) < radius);
+      const spinnerReach = Math.abs(Math.cos(ob.rotation.y)) * 3.8;
+      const spinnerX = clamp(groupX, -spinnerReach, spinnerReach);
+      if (d.type === 'spinner' && spinnerReach > .45 && touchesX(spinnerX, .48)) obstacleHit(ob, spinnerX);
+      if (d.type === 'block' && touchesX(ob.children[0].position.x, 1.45)) obstacleHit(ob, ob.children[0].position.x);
+      if (d.type === 'zone' && touchesX(d.x, 1.75)) obstacleHit(ob, d.x);
+      if (d.type === 'gap') {
+        const leftHit = touchesX(-3.55, 1.55), rightHit = touchesX(3.55, 1.55);
+        if (leftHit || rightHit) obstacleHit(ob, leftHit ? -3.55 : 3.55);
+      }
     }
   }
   const progress = clamp((-runZ + 4) / 217, 0, 1); setProgress(progress);
@@ -301,4 +328,4 @@ function animate() {
   renderer.render(scene,camera);
 }
 
-createEnvironment(); runGroup = new THREE.Group(); world.add(runGroup); levelData = makeLevel(save.level); createTrack(); createTower(); ballCount = levelData.startBalls; runZ = -10; groupX = 0; runGroup.add(ballMesh); cosmeticMaterial(); updateBallInstances(0); updateMenu(); setState('menu'); animate();
+createEnvironment(); runGroup = new THREE.Group(); world.add(runGroup); levelData = makeLevel(save.level); createTrack(); createTower(); ballCount = levelData.startBalls; resetBallFormation(ballCount); runZ = -10; groupX = 0; runGroup.add(ballMesh); cosmeticMaterial(); updateBallInstances(0); updateMenu(); setState('menu'); animate();
