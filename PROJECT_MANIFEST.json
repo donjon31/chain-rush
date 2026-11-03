@@ -1,0 +1,49 @@
+{
+  "project": {
+    "name": "CHAIN RUSH",
+    "type": "mobile-first Three.js browser game",
+    "version": "1.1.0",
+    "language": "JavaScript",
+    "orientation": "portrait",
+    "backend_required": false,
+    "live_url": "https://chain-rush-arcade.pernillehoejer.chatgpt.site"
+  },
+  "entrypoints": {
+    "application": "dist/index.html",
+    "rendering_and_gameplay": "dist/js/game.js",
+    "pure_game_logic": "dist/js/gameLogic.js",
+    "styles": "dist/styles.css",
+    "tests": "tests/gameLogic.test.mjs"
+  },
+  "features": [
+    "automatic forward movement",
+    "touch and mouse steering",
+    "mathematical gates",
+    "spatial obstacle collisions",
+    "GPU-instanced ball army",
+    "aim-and-release destruction finale",
+    "support-aware cascading destruction physics",
+    "event-driven combo callouts and slow motion",
+    "animated multiplication growth waves",
+    "adaptive pooled debris and dust effects",
+    "ten generated levels",
+    "local progression and currency",
+    "cosmetic shop",
+    "synthesized sound and haptics",
+    "shareable results"
+  ],
+  "commands": {
+    "develop": "npm run dev",
+    "test": "npm test",
+    "build": "npm run build"
+  },
+  "assistant_read_order": [
+    "START_HERE_CHATGPT.md",
+    "PROJECT_MANIFEST.json",
+    "dist/js/gameLogic.js",
+    "dist/js/game.js",
+    "dist/index.html",
+    "dist/styles.css",
+    "tests/gameLogic.test.mjs"
+  ]
+}

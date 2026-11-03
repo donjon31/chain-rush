@@ -24,15 +24,20 @@ window.ChainRushProviders = Object.freeze({
 const track = (name, data = {}) => window.ChainRushProviders.analytics.track(name, data);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+const lowPower = (navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrency || 8) <= 4;
+const effectScale = lowPower ? .62 : 1;
+renderer.setPixelRatio(Math.min(devicePixelRatio, lowPower ? 1.25 : 1.7));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.18;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x71b9ff);
-scene.fog = new THREE.Fog(0x81d6ff, 38, 145);
+const skyCanvas = document.createElement('canvas'); skyCanvas.width = 16; skyCanvas.height = 256;
+const skyCtx = skyCanvas.getContext('2d'), skyGradient = skyCtx.createLinearGradient(0, 0, 0, 256);
+skyGradient.addColorStop(0, '#4d6eea'); skyGradient.addColorStop(.42, '#65c9ff'); skyGradient.addColorStop(1, '#d6f3ff'); skyCtx.fillStyle = skyGradient; skyCtx.fillRect(0, 0, 16, 256);
+const skyTexture = new THREE.CanvasTexture(skyCanvas); skyTexture.colorSpace = THREE.SRGBColorSpace; scene.background = skyTexture;
+scene.fog = new THREE.Fog(0x9bdcff, 42, 152);
 const camera = new THREE.PerspectiveCamera(54, 1, .1, 260);
 camera.position.set(0, 8.7, 14);
 camera.lookAt(0, 0, -8);
@@ -41,11 +46,13 @@ scene.add(new THREE.HemisphereLight(0xe8f7ff, 0x6b3ab5, 3));
 const sun = new THREE.DirectionalLight(0xffffff, 4.2); sun.position.set(-8, 18, 10); sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = -18; sun.shadow.camera.right = 18; sun.shadow.camera.top = 24; sun.shadow.camera.bottom = -12; scene.add(sun);
 const fill = new THREE.DirectionalLight(0xff74c9, 1.5); fill.position.set(9, 7, -8); scene.add(fill);
+const runnerRim = new THREE.PointLight(0x74eaff, 2.4, 18, 2); runnerRim.position.set(-4, 5, 2); scene.add(runnerRim);
 
 const world = new THREE.Group(); scene.add(world);
 const deco = new THREE.Group(); scene.add(deco);
-let state = 'menu', levelData, runGroup, towerGroup, gateObjects = [], obstacleObjects = [], blocks = [], shots = [], particles = [];
-let ballCount = 12, runZ = 0, targetX = 0, groupX = 0, fired = false, finishTimer = 0, destroyed = 0, combo = 0, maxCombo = 0, lastDestroyAt = 0, shake = 0, levelStartBalls = 0;
+let state = 'menu', levelData, runGroup, towerGroup, gateObjects = [], obstacleObjects = [], blocks = [], shots = [], particles = [], particlePool = [];
+let ballCount = 12, runZ = 0, targetX = 0, groupX = 0, fired = false, finishTimer = 0, destroyed = 0, combo = 0, maxCombo = 0, lastDestroyAt = 0, shake = 0, cameraImpulse = 0, levelStartBalls = 0;
+let targetDestroy = 0, displayedDestroy = 0, slowMo = 0, finaleWarned = false, growthWave = 0;
 let ballMembers = [];
 let pointer = { down: false, x: 0, y: 0, startX: 0, startY: 0, aimX: 0, aimY: .18 };
 const clock = new THREE.Clock();
@@ -56,13 +63,17 @@ const edgeMat = glossy(0xd8c8ff, .05, .27);
 const bonusMat = glossy(0x25e2ad, .05, .18, 0x0a5b42);
 const lossMat = glossy(0xff496d, .02, .2, 0x7a0e26);
 const obstacleMat = glossy(0xff3f72, .1, .22);
-const ballGeo = new THREE.SphereGeometry(.29, 12, 10);
-const ballMesh = new THREE.InstancedMesh(ballGeo, glossy(0x7656ff, .12, .16), MAX_BALLS);
+const ballGeo = new THREE.SphereGeometry(.3, lowPower ? 10 : 14, lowPower ? 8 : 12);
+const ballMaterial = new THREE.MeshPhysicalMaterial({ color: 0x7656ff, metalness: .16, roughness: .13, clearcoat: 1, clearcoatRoughness: .1, emissive: 0x000000, emissiveIntensity: .35 });
+const ballMesh = new THREE.InstancedMesh(ballGeo, ballMaterial, MAX_BALLS);
 ballMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); ballMesh.castShadow = true; ballMesh.receiveShadow = true; ballMesh.count = 0;
 // Instance transforms move with the runner every frame. Three's cached aggregate
 // bounds otherwise remain behind and can incorrectly cull the whole ball army.
 ballMesh.frustumCulled = false;
 const dummy = new THREE.Object3D();
+const particleGeo = new THREE.IcosahedronGeometry(.11, 0);
+const dustMat = new THREE.MeshBasicMaterial({ color: 0xf5e9d5, transparent: true, opacity: .55, depthWrite: false });
+const particleMaterials = new Map();
 
 function cosmeticMaterial() {
   const item = COSMETICS.find(c => c.id === save.selected) || COSMETICS[0];
@@ -88,26 +99,35 @@ function makeText(text, color = '#ffffff', fontSize = 72) {
   const c = document.createElement('canvas'); c.width = 384; c.height = 160;
   const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); ctx.font = `900 ${fontSize}px Nunito, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.lineWidth = 12; ctx.strokeStyle = 'rgba(25,15,66,.45)'; ctx.strokeText(text, 192, 82); ctx.fillStyle = color; ctx.fillText(text, 192, 82);
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })); spr.scale.set(4.8, 2, 1); return spr;
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false })); spr.scale.set(4.8, 2, 1); return spr;
 }
 
 function createEnvironment() {
   while (deco.children.length) deco.remove(deco.children[0]);
-  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .6 });
+  const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(8, 40), new THREE.MeshBasicMaterial({ color: 0xfff1ae, transparent: true, opacity: .7, fog: false }));
+  sunDisc.position.set(-19, 22, -125); sunDisc.rotation.y = .15; deco.add(sunDisc);
+  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .72 });
   for (let i = 0; i < 28; i++) {
     const cloud = new THREE.Mesh(new THREE.IcosahedronGeometry(1 + (i % 3) * .45, 1), cloudMat);
-    cloud.position.set((i % 2 ? 1 : -1) * (9 + (i * 7) % 14), 4 + (i * 3) % 12, 15 - i * 13); cloud.scale.y = .38; deco.add(cloud);
+    cloud.position.set((i % 2 ? 1 : -1) * (9 + (i * 7) % 14), 5 + (i * 3) % 12, 15 - i * 13); cloud.scale.set(1.8, .45, .7); deco.add(cloud);
   }
-  const islandMat = glossy(0xb584ff, .02, .76);
+  const islandMat = glossy(0x896bea, .04, .68);
   for (let i = 0; i < 22; i++) {
     const island = new THREE.Mesh(new THREE.ConeGeometry(2 + (i % 4), 8, 6), islandMat);
     island.position.set((i % 2 ? 1 : -1) * (12 + (i % 5) * 4), -5, 5 - i * 14); island.rotation.z = Math.PI; deco.add(island);
+    if (i % 3 === 0) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2 + i % 2, .08, 6, 32), new THREE.MeshBasicMaterial({ color: i % 2 ? 0xff72c9 : 0x62efff, transparent: true, opacity: .42 }));
+      ring.position.set(island.position.x * .88, 3 + i % 5, island.position.z - 5); ring.rotation.x = Math.PI / 2; ring.userData.float = i * .5; ring.userData.baseY = ring.position.y; deco.add(ring);
+    }
   }
 }
 
 function createTrack() {
   const track = roundedBox(10, .65, 242, .2, trackMat); track.position.set(0, -.55, -104); runGroup.add(track);
-  for (const x of [-5.15, 5.15]) { const edge = roundedBox(.25, .55, 242, .1, edgeMat); edge.position.set(x, -.1, -104); runGroup.add(edge); }
+  for (const x of [-5.15, 5.15]) {
+    const edge = roundedBox(.25, .55, 242, .1, edgeMat); edge.position.set(x, -.1, -104); runGroup.add(edge);
+    const glow = roundedBox(.06, .1, 242, .04, new THREE.MeshBasicMaterial({ color: 0x8f74ff })); glow.position.set(x > 0 ? 5.02 : -5.02, .18, -104); runGroup.add(glow);
+  }
   for (let z = 8; z > -215; z -= 12) {
     const stripe = roundedBox(8.8, .04, .16, 0, new THREE.MeshBasicMaterial({ color: 0xded7ff, transparent: true, opacity: .7 })); stripe.position.set(0, -.21, z); runGroup.add(stripe);
   }
@@ -119,9 +139,13 @@ function createGate(pair) {
   const group = new THREE.Group(); group.position.z = pair.z; group.userData = { triggered: false, pair };
   [['left', -2.55], ['right', 2.55]].forEach(([side, x]) => {
     const mod = pair[side]; const good = mod.op === '+' || mod.op === 'x'; const mat = good ? bonusMat : lossMat;
-    const pane = roundedBox(4.7, 3.2, .18, .1, new THREE.MeshStandardMaterial({ color: good ? 0x16dc9d : 0xff466d, transparent: true, opacity: .42, emissive: good ? 0x0b704e : 0x771126, emissiveIntensity: .4 })); pane.position.set(x, 1.5, 0); group.add(pane);
-    for (const px of [x - 2.25, x + 2.25]) { const post = roundedBox(.22, 3.8, .28, .05, mat); post.position.set(px, 1.45, 0); group.add(post); }
-    const label = makeText(modifierLabel(mod)); label.position.set(x, 1.55, .18); group.add(label);
+    const gateMat = new THREE.MeshStandardMaterial({ color: good ? 0x19e6a1 : 0xff395f, transparent: true, opacity: .68, metalness: .08, roughness: .18, emissive: good ? 0x087353 : 0x8a0b28, emissiveIntensity: .65 });
+    const pane = roundedBox(4.62, 3.08, .24, .12, gateMat); pane.position.set(x, 1.52, 0); group.add(pane);
+    for (const px of [x - 2.28, x + 2.28]) { const post = roundedBox(.3, 3.9, .38, .07, mat); post.position.set(px, 1.48, 0); group.add(post); }
+    const cap = roundedBox(4.88, .32, .42, .08, mat); cap.position.set(x, 3.28, 0); group.add(cap);
+    const foot = roundedBox(4.72, .12, .75, .06, new THREE.MeshBasicMaterial({ color: good ? 0x67ffce : 0xff6a83, transparent: true, opacity: .9 })); foot.position.set(x, -.15, -.08); group.add(foot);
+    const label = makeText(modifierLabel(mod), '#ffffff', 84); label.position.set(x, 1.58, .28); label.scale.set(5.35, 2.2, 1); group.add(label);
+    group.userData[side] = { pane, cap, label, good };
   });
   runGroup.add(group); gateObjects.push(group);
 }
@@ -141,27 +165,28 @@ function createTower() {
   const { rows, cols, layers } = levelData.tower;
   const palette = [0xff5aa7, 0x734dff, 0x23d7ed, 0xffd54a];
   for (let layer = 0; layer < layers; layer++) for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
-    if ((x + y + layer + levelData.level) % 11 === 0 && y > 1) continue;
+    if ((x + y + layer + levelData.level) % 11 === 0 && y > rows - 3) continue;
     const w = 1.35, h = .88, d = 1.35; const mesh = roundedBox(w, h, d, .08, glossy(palette[(x + y + layer) % palette.length], .08, .23));
     mesh.position.set((x - (cols - 1) / 2) * 1.42 + (y % 2) * .12, y * .93, -240 + (layer - (layers - 1) / 2) * 1.5);
-    mesh.userData = { alive: true, vel: new THREE.Vector3(), baseY: mesh.position.y, delay: 0, id: blocks.length }; mesh.castShadow = true; towerGroup.add(mesh); blocks.push(mesh);
+    mesh.userData = { alive: true, vel: new THREE.Vector3(), baseY: mesh.position.y, delay: 0, unsupported: 0, id: blocks.length }; mesh.castShadow = true; towerGroup.add(mesh); blocks.push(mesh);
   }
   const crown = makeText('CRUSH ME', '#ffe24c', 56); crown.position.set(0, rows * .95 + .7, -240); towerGroup.add(crown);
 }
 
 function createLevel(level, replay = false) {
-  clearGroup(runGroup); clearGroup(towerGroup); runGroup = new THREE.Group(); world.add(runGroup); gateObjects = []; obstacleObjects = []; shots = []; particles = [];
-  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = 0;
+  shots.forEach(mesh => world.remove(mesh)); particles.forEach(mesh => world.remove(mesh)); clearGroup(runGroup); clearGroup(towerGroup); runGroup = new THREE.Group(); world.add(runGroup); gateObjects = []; obstacleObjects = []; shots = []; particles = [];
+  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = cameraImpulse = 0; targetDestroy = displayedDestroy = 0; slowMo = 0; finaleWarned = false;
   createTrack(); levelData.gates.forEach(createGate); levelData.obstacles.forEach(createObstacle); createTower();
   runGroup.add(ballMesh); cosmeticMaterial(); updateBallInstances(0); setState('running'); updateHud();
-  camera.position.set(0, 8.7, 14); camera.lookAt(0, 0, -8); track('level_start', { level, replay });
+  $('#destroy-percent').textContent = '0%'; $('#destroy-fill').style.width = '0%'; camera.position.set(0, 8.7, 14); camera.lookAt(0, 0, -8); track('level_start', { level, replay });
 }
 
 function makeFormation(count) {
   const spread = Math.min(3.35, .65 + Math.sqrt(count) * .18);
   return Array.from({ length: count }, (_, i) => {
     const r = Math.sqrt(i / Math.max(1, count)) * spread, a = i * 2.399963;
-    return { x: Math.cos(a) * r, z: Math.sin(a) * r * .72, phase: i * .7 };
+    const x = Math.cos(a) * r, z = Math.sin(a) * r * .72;
+    return { x, z, tx: x, tz: z, phase: i * .7, birth: -1, popUntil: 0 };
   });
 }
 
@@ -170,20 +195,38 @@ function resetBallFormation(count) {
   ballCount = ballMembers.length;
 }
 
+function growBallFormation(count) {
+  const next = Math.max(1, Math.min(MAX_BALLS, count)), targets = makeFormation(next), now = clock.elapsedTime, previous = ballMembers.length;
+  for (let i = 0; i < next; i++) {
+    if (i < previous) {
+      ballMembers[i].tx = targets[i].x; ballMembers[i].tz = targets[i].z; ballMembers[i].popUntil = now + .42;
+    } else {
+      ballMembers.push({ x: (Math.random() - .5) * .35, z: .2 + Math.random() * .25, tx: targets[i].x, tz: targets[i].z, phase: i * .7, birth: now + (i - previous) * .0045, popUntil: now + .5 });
+    }
+  }
+  ballCount = ballMembers.length; growthWave = .7;
+}
+
 function updateBallInstances(time) {
   ballMesh.count = ballMembers.length;
   for (let i = 0; i < ballMembers.length; i++) {
-    const member = ballMembers[i], x = groupX + member.x, z = runZ + member.z;
-    dummy.position.set(x, .18 + Math.sin(time * 6 + member.phase) * .055, z); const s = .92 + (i % 7) * .012; dummy.scale.setScalar(s); dummy.rotation.set(time + i, time * .7 + i, 0); dummy.updateMatrix(); ballMesh.setMatrixAt(i, dummy.matrix);
-    if (save.selected === 'rainbow') ballMesh.setColorAt(i, new THREE.Color().setHSL((i / Math.max(1, ballCount) + time * .08) % 1, .82, .6));
+    const member = ballMembers[i]; member.x = lerp(member.x, member.tx, .12); member.z = lerp(member.z, member.tz, .12);
+    const bornScale = member.birth < 0 ? 1 : clamp((time - member.birth) * 5.5, 0, 1); const eased = 1 - (1 - bornScale) ** 3;
+    const pop = member.popUntil > time ? Math.sin(clamp((member.popUntil - time) / .42, 0, 1) * Math.PI) * .28 : 0;
+    const organicX = Math.sin(time * 1.8 + member.phase) * .035, organicZ = Math.cos(time * 1.5 + member.phase) * .028;
+    const x = groupX + member.x + organicX, z = runZ + member.z + organicZ;
+    dummy.position.set(x, .2 + Math.sin(time * 6 + member.phase) * .065 + pop * .16, z); const s = (.94 + (i % 7) * .011 + pop) * eased; dummy.scale.setScalar(Math.max(.02, s)); dummy.rotation.set(time + i, time * .7 + i, 0); dummy.updateMatrix(); ballMesh.setMatrixAt(i, dummy.matrix);
+    if (save.selected === 'rainbow') ballMesh.setColorAt(i, new THREE.Color().setHSL((i / Math.max(1, ballCount) + time * .08) % 1, .82, .6)); else if (ballMesh.instanceColor) ballMesh.setColorAt(i, new THREE.Color(0xffffff));
   }
   ballMesh.instanceMatrix.needsUpdate = true; if (ballMesh.instanceColor) ballMesh.instanceColor.needsUpdate = true;
 }
 
 function modifyBalls(mod, worldPos) {
-  const before = ballCount; const next = applyModifier(ballCount, mod); const diff = next - before; resetBallFormation(Math.max(1, next));
-  showToast(`${diff >= 0 ? '+' : ''}${diff}`, diff >= 0); burst(worldPos, diff >= 0 ? 0x54ffe0 : 0xff3b6f, Math.min(22, Math.abs(diff) + 6));
-  sound(diff >= 0 ? 'gate' : 'hit'); haptic(diff >= 0 ? 24 : [35, 30, 35]); $('#ball-badge').classList.add('pop'); setTimeout(() => $('#ball-badge').classList.remove('pop'), 180); updateHud();
+  const before = ballCount, next = applyModifier(ballCount, mod), diff = next - before;
+  if (diff > 0) growBallFormation(next); else resetBallFormation(Math.max(1, next));
+  const multiplier = mod.op === 'x' && mod.value >= 3;
+  showToast(multiplier ? `ARMY ×${mod.value}!` : `${diff >= 0 ? '+' : ''}${diff}`, diff >= 0); burst(worldPos, diff >= 0 ? 0x54ffe0 : 0xff3b6f, Math.min(lowPower ? 18 : 32, Math.abs(diff) + 9));
+  sound(multiplier ? 'multiply' : diff >= 0 ? 'gate' : 'hit'); haptic(multiplier ? [25, 18, 42] : diff >= 0 ? 24 : [35, 30, 35]); cameraImpulse = multiplier ? .42 : .2; shake = Math.max(shake, multiplier ? .16 : .08); $('#ball-badge').classList.add('pop'); setTimeout(() => $('#ball-badge').classList.remove('pop'), 220); updateHud();
   if (next <= 0) showToast('LAST CHANCE!', false);
 }
 
@@ -195,7 +238,7 @@ function obstacleHit(ob, impactWorldX) {
   const removed = ballMembers.filter((_, index) => removedSet.has(index));
   ballMembers = ballMembers.filter((_, index) => !removedSet.has(index)); ballCount = ballMembers.length;
   removed.forEach((member, i) => {
-    const mesh = new THREE.Mesh(ballGeo, ballMesh.material); mesh.position.set(groupX + member.x, .25, runZ + member.z); mesh.userData.vel = new THREE.Vector3((member.x - impact.x) * 2.5 + (Math.random() - .5) * 2, 2.8 + Math.random() * 2.5, 2 + Math.random() * 2); mesh.userData.life = .65 + Math.random() * .35; mesh.scale.setScalar(.9); world.add(mesh); particles.push(mesh);
+    const mesh = new THREE.Mesh(ballGeo, ballMesh.material); mesh.position.set(groupX + member.x, .25, runZ + member.z); mesh.userData.vel = new THREE.Vector3((member.x - impact.x) * 2.5 + (Math.random() - .5) * 2, 2.8 + Math.random() * 2.5, 2 + Math.random() * 2); mesh.userData.life = mesh.userData.maxLife = .65 + Math.random() * .35; mesh.userData.poolable = false; mesh.userData.startScale = .9; mesh.scale.setScalar(.9); world.add(mesh); particles.push(mesh);
   });
   showToast(`-${loss}`, false); burst(new THREE.Vector3(impactWorldX, .4, runZ - .7), 0xff315f, 10); sound('hit'); haptic([45, 25, 35]); shake = .35; updateHud();
 }
@@ -203,9 +246,11 @@ function obstacleHit(ob, impactWorldX) {
 function updateRun(dt, t) {
   const speed = 10.3 + Math.min(4, levelData.level * .3); runZ -= speed * dt; groupX = lerp(groupX, targetX, 1 - Math.exp(-dt * 12)); groupX = clamp(groupX, -4.1, 4.1); updateBallInstances(t);
   for (const g of gateObjects) {
-    if (!g.userData.triggered && runZ < g.position.z + 1 && runZ > g.position.z - 2.2) { g.userData.triggered = true; const side = groupX < 0 ? 'left' : 'right'; modifyBalls(g.userData.pair[side], new THREE.Vector3(groupX, 1.4, g.position.z)); }
+    const glow = 1 + Math.sin(t * 4 + g.position.z) * .035; if (!g.userData.triggered) g.scale.set(glow, 1 + (glow - 1) * .5, glow);
+    if (g.userData.pulse > 0) { g.userData.pulse = Math.max(0, g.userData.pulse - dt * 3.5); const kick = 1 + Math.sin(g.userData.pulse * Math.PI) * .12; g.scale.set(kick, kick, kick); }
+    if (!g.userData.triggered && runZ < g.position.z + 1 && runZ > g.position.z - 2.2) { g.userData.triggered = true; g.userData.pulse = 1; const side = groupX < 0 ? 'left' : 'right'; modifyBalls(g.userData.pair[side], new THREE.Vector3(groupX, 1.4, g.position.z)); }
     // Retire scenery once it passes the camera so sprites never fill the near plane.
-    if (runZ < g.position.z - 7) g.visible = false;
+    if (runZ < g.position.z - 3.2) g.visible = false;
   }
   for (const ob of obstacleObjects) {
     const d = ob.userData; if (d.type === 'spinner') ob.rotation.y += dt * d.speed * 2.5;
@@ -224,17 +269,20 @@ function updateRun(dt, t) {
     }
   }
   const progress = clamp((-runZ + 4) / 217, 0, 1); setProgress(progress);
-  camera.position.x = lerp(camera.position.x, groupX * .3, dt * 3); camera.position.z = runZ + 14; camera.position.y = 8.7; camera.lookAt(groupX * .25, .1, runZ - 8);
+  if (progress > .82 && !finaleWarned) { finaleWarned = true; showCallout('FINAL TOWER', `${ballCount} BALLS READY`, 'anticipation'); sound('ready'); }
+  runnerRim.position.set(groupX - 3, 4.5, runZ + 2);
+  const speedBob = Math.sin(t * 4.2) * .045; camera.position.x = lerp(camera.position.x, groupX * .34, 1 - Math.exp(-dt * 3.5)); camera.position.z = runZ + 14 + cameraImpulse; camera.position.y = 8.65 + speedBob; camera.lookAt(groupX * .28, .15, runZ - 8.5);
+  cameraImpulse = lerp(cameraImpulse, 0, 1 - Math.exp(-dt * 7)); growthWave = Math.max(0, growthWave - dt);
   if (runZ <= -214) beginAim();
 }
 
 function beginAim() {
-  state = nextState(state, 'FINISH_RUN'); runZ = -226; targetX = groupX = 0; updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.add('active'); setProgress(1);
-  showToast('AIM & SMASH!', true); sound('ready'); haptic([25, 30, 25]); track('finale_ready', { balls: ballCount });
+  state = nextState(state, 'FINISH_RUN'); shell.dataset.state = 'aiming'; runZ = -226; targetX = groupX = 0; updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.add('active'); setProgress(1);
+  showCallout('AIM & SMASH!', `${ballCount} BALL VOLLEY`, 'anticipation'); sound('ready'); haptic([25, 30, 25]); track('finale_ready', { balls: ballCount });
 }
 
 function fireVolley() {
-  if (fired || state !== 'aiming') return; fired = true; state = nextState(state, 'FIRE'); $('#aim-ui').classList.remove('active'); ballMesh.count = 0;
+  if (fired || state !== 'aiming') return; fired = true; state = nextState(state, 'FIRE'); shell.dataset.state = 'firing'; $('#aim-ui').classList.remove('active'); ballMesh.count = 0;
   const visualCount = Math.min(130, ballCount), power = 16 + Math.min(8, ballCount / 28);
   for (let i = 0; i < visualCount; i++) {
     const mesh = new THREE.Mesh(ballGeo, ballMesh.material); mesh.scale.setScalar(.82 + (i % 5) * .035); mesh.castShadow = true;
@@ -242,20 +290,30 @@ function fireVolley() {
     const dir = new THREE.Vector3(pointer.aimX * .48 + (Math.random() - .5) * .08, .19 + pointer.aimY * .18 + Math.random() * .05, -1).normalize();
     mesh.userData.vel = dir.multiplyScalar(power * (.88 + Math.random() * .22)); mesh.userData.life = 0; mesh.userData.damage = Math.max(1, ballCount / visualCount); world.add(mesh); shots.push(mesh);
   }
-  finishTimer = 0; sound('launch'); haptic(70); shake = .2; track('volley_fired', { balls: ballCount });
+  finishTimer = 0; sound('launch'); haptic(70); shake = .2; cameraImpulse = .35; showCallout('VOLLEY AWAY!', `${ballCount} BALLS`, 'impact'); track('volley_fired', { balls: ballCount });
 }
 
 function hitBlock(block, shot) {
   if (!block.userData.alive) return; block.userData.alive = false; destroyed++;
   const now = performance.now(); combo = now - lastDestroyAt < 450 ? combo + 1 : 1; lastDestroyAt = now; maxCombo = Math.max(maxCombo, combo);
-  block.userData.vel.copy(shot.userData.vel).multiplyScalar(.1 + Math.random() * .07); block.userData.vel.y += 3 + Math.random() * 3; block.userData.vel.x += (Math.random() - .5) * 3; block.userData.vel.z += (Math.random() - .5) * 2;
-  burst(block.position.clone(), block.material.color.getHex(), 5); if (combo > 2 && combo % 3 === 0) showToast(`×${combo} COMBO`, true); shake = Math.min(.6, shake + .08); sound(combo > 5 ? 'crush' : 'pop');
-  const pct = Math.round(destroyed / blocks.length * 100); $('#destroy-percent').textContent = `${pct}%`; $('#destroy-fill').style.width = `${pct}%`;
-  if (combo >= 5) blocks.forEach(b => { if (b.userData.alive && b.position.distanceTo(block.position) < 1.7 && Math.random() < .24) { b.userData.delay = .04 + Math.random() * .15; b.userData.chainFrom = shot; } });
+  const incoming = shot?.userData?.vel || new THREE.Vector3(0, 2, -4); block.userData.vel.copy(incoming).multiplyScalar(.11 + Math.random() * .06); block.userData.vel.y += 3.4 + Math.random() * 3.2; block.userData.vel.x += (Math.random() - .5) * 3.6; block.userData.vel.z += (Math.random() - .5) * 2.4;
+  burst(block.position.clone(), block.material.color.getHex(), 5); dust(block.position.clone(), combo > 7 ? 8 : 4);
+  targetDestroy = destroyed / blocks.length * 100; shake = Math.min(.62, shake + .055 + combo * .003); cameraImpulse = Math.min(.5, cameraImpulse + .05); sound(combo > 6 ? 'crush' : 'pop');
+  if (combo === 1 && destroyed === 1) showCallout('NICE HIT!', 'DIRECT IMPACT', 'impact');
+  if (combo === 5) showCallout('CHAIN REACTION!', '×5 COMBO', 'chain');
+  if (combo === 10) { showCallout('MEGA CRUSH!', '×10 COMBO', 'mega'); slowMo = .22; haptic([38, 20, 60]); }
+  if (targetDestroy >= 95 && !towerGroup.userData.totalCalled) { towerGroup.userData.totalCalled = true; showCallout('TOTAL DESTRUCTION!', 'TOWER OBLITERATED', 'mega'); slowMo = .28; }
+  blocks.forEach(b => {
+    if (!b.userData.alive || b.userData.delay > 0) return;
+    const dx = Math.abs(b.position.x - block.position.x), dz = Math.abs(b.position.z - block.position.z), dy = b.position.y - block.position.y;
+    const directlyAbove = dy > .35 && dy < 1.35 && dx < 1.05 && dz < .95;
+    const shockNeighbor = combo >= 4 && b.position.distanceTo(block.position) < 1.65 && Math.random() < .12 + Math.min(.18, combo * .012);
+    if (directlyAbove || shockNeighbor) { b.userData.delay = .05 + Math.random() * .16; b.userData.chainFrom = shot; }
+  });
 }
 
 function updateFinale(dt) {
-  finishTimer += dt; camera.position.x = lerp(camera.position.x, 0, dt * 2); camera.position.y = lerp(camera.position.y, 7.8, dt * 2); camera.position.z = lerp(camera.position.z, -215.2, dt * 2); camera.lookAt(0, 3, -240);
+  finishTimer += dt; camera.position.x = lerp(camera.position.x, Math.sin(finishTimer * .6) * .45, 1 - Math.exp(-dt * 2)); camera.position.y = lerp(camera.position.y, 7.6 - Math.min(1, targetDestroy / 100), 1 - Math.exp(-dt * 2)); camera.position.z = lerp(camera.position.z, -215.3 + cameraImpulse, 1 - Math.exp(-dt * 2)); camera.lookAt(0, 2.8, -240); cameraImpulse = lerp(cameraImpulse, 0, 1 - Math.exp(-dt * 6));
   for (let i = shots.length - 1; i >= 0; i--) {
     const s = shots[i]; s.userData.life += dt; s.userData.vel.y -= 6.8 * dt; s.position.addScaledVector(s.userData.vel, dt); s.rotation.x += dt * 9;
     let hit = null; if (s.position.z < -235.2 && s.position.z > -244.5) for (const b of blocks) if (b.userData.alive && s.position.distanceTo(b.position) < 1.05) { hit = b; break; }
@@ -264,9 +322,16 @@ function updateFinale(dt) {
   }
   for (const b of blocks) {
     if (b.userData.delay > 0) { b.userData.delay -= dt; if (b.userData.delay <= 0) hitBlock(b, b.userData.chainFrom); }
+    if (b.userData.alive && b.position.y > .6 && b.userData.delay <= 0) {
+      const supported = blocks.some(s => s !== b && s.userData.alive && s.position.y < b.position.y && b.position.y - s.position.y < 1.18 && Math.abs(s.position.x - b.position.x) < .82 && Math.abs(s.position.z - b.position.z) < .92);
+      b.userData.unsupported = supported ? 0 : b.userData.unsupported + dt;
+      if (b.userData.unsupported > .14) hitBlock(b, { userData: { vel: new THREE.Vector3((Math.random() - .5) * 2, 1, -1) } });
+    }
     if (!b.userData.alive) { b.userData.vel.y -= 12 * dt; b.position.addScaledVector(b.userData.vel, dt); b.rotation.x += b.userData.vel.z * dt; b.rotation.z += b.userData.vel.x * dt; if (b.position.y < -.25) { b.position.y = -.25; b.userData.vel.y *= -.25; b.userData.vel.multiplyScalar(.91); } }
   }
-  if (state === 'firing' && finishTimer > 2.3 && shots.length === 0) finishLevel();
+  displayedDestroy = lerp(displayedDestroy, targetDestroy, 1 - Math.exp(-dt * 7)); const displayPct = Math.round(displayedDestroy); $('#destroy-percent').textContent = `${displayPct}%`; $('#destroy-fill').style.width = `${displayedDestroy}%`;
+  const quiet = performance.now() - lastDestroyAt > 900;
+  if (state === 'firing' && finishTimer > 3 && shots.length === 0 && quiet) finishLevel();
 }
 
 function finishLevel() {
@@ -276,19 +341,35 @@ function finishLevel() {
   setTimeout(() => setState('results'), 450); sound('victory'); haptic([60, 50, 80]); track('level_complete', { level: levelData.level, score, destruction: pct, coins });
 }
 
+function particleMaterial(color) {
+  if (!particleMaterials.has(color)) particleMaterials.set(color, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .9, depthWrite: false }));
+  return particleMaterials.get(color);
+}
+
+function acquireParticle(material) {
+  const mesh = particlePool.pop() || new THREE.Mesh(particleGeo, material); mesh.material = material; mesh.visible = true; mesh.userData.poolable = true; world.add(mesh); return mesh;
+}
+
 function burst(position, color, amount = 10) {
-  for (let i = 0; i < amount; i++) { const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(.07 + Math.random() * .1, 0), new THREE.MeshBasicMaterial({ color })); mesh.position.copy(position); mesh.userData.vel = new THREE.Vector3((Math.random() - .5) * 6, Math.random() * 5, (Math.random() - .5) * 6); mesh.userData.life = .6 + Math.random() * .5; world.add(mesh); particles.push(mesh); }
+  const total = Math.max(2, Math.floor(amount * effectScale)), material = particleMaterial(color);
+  for (let i = 0; i < total; i++) { const mesh = acquireParticle(material); mesh.position.copy(position); mesh.userData.vel = new THREE.Vector3((Math.random() - .5) * 6, Math.random() * 5, (Math.random() - .5) * 6); mesh.userData.life = mesh.userData.maxLife = .55 + Math.random() * .45; mesh.userData.startScale = .55 + Math.random() * .75; mesh.scale.setScalar(mesh.userData.startScale); particles.push(mesh); }
+}
+
+function dust(position, amount = 6) {
+  const total = Math.max(2, Math.floor(amount * effectScale));
+  for (let i = 0; i < total; i++) { const mesh = acquireParticle(dustMat); mesh.position.copy(position); mesh.userData.vel = new THREE.Vector3((Math.random() - .5) * 2.8, .7 + Math.random() * 2.1, (Math.random() - .5) * 2.8); mesh.userData.life = mesh.userData.maxLife = .55 + Math.random() * .45; mesh.userData.startScale = 1.2 + Math.random() * 1.4; mesh.scale.setScalar(mesh.userData.startScale); particles.push(mesh); }
 }
 
 function updateParticles(dt) {
-  for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.userData.life -= dt; p.userData.vel.y -= 8 * dt; p.position.addScaledVector(p.userData.vel, dt); p.scale.setScalar(Math.max(0, p.userData.life)); if (p.userData.life <= 0) { world.remove(p); particles.splice(i, 1); } }
+  for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.userData.life -= dt; p.userData.vel.y -= (p.material === dustMat ? 1.2 : 8) * dt; p.position.addScaledVector(p.userData.vel, dt); const ratio = clamp(p.userData.life / p.userData.maxLife, 0, 1); p.scale.setScalar(p.userData.startScale * ratio); if (p.userData.life <= 0) { world.remove(p); particles.splice(i, 1); if (p.userData.poolable) { p.visible = false; particlePool.push(p); } } }
 }
 
 function showToast(text, good = true) { const el = $('#toast'); el.textContent = text; el.className = `toast show ${good ? 'good' : 'bad'}`; clearTimeout(showToast.timer); showToast.timer = setTimeout(() => el.classList.remove('show'), 700); }
+function showCallout(title, subtitle = '', style = 'impact') { const el = $('#combo-callout'); el.querySelector('b').textContent = title; el.querySelector('span').textContent = subtitle; el.className = `combo-callout show ${style}`; clearTimeout(showCallout.timer); showCallout.timer = setTimeout(() => el.classList.remove('show'), 1050); const flash = $('#impact-flash'); flash.classList.add('show'); setTimeout(() => flash.classList.remove('show'), 110); }
 function setProgress(p) { const pct = p * 100; $('#progress-fill').style.width = `${pct}%`; $('#progress-dot').style.left = `${pct}%`; }
 function updateHud() { $('#ball-count').textContent = ballCount; $('#hud-level').textContent = levelData?.level || save.level; }
 function updateMenu() { $('#menu-level').textContent = save.level; $('#menu-coins').textContent = save.coins; $('#menu-best').textContent = save.best.toLocaleString(); $('#shop-coins').textContent = save.coins; renderShop(); updateMute(); }
-function setState(next) { state = next; Object.values(ui).forEach(x => x.classList.remove('active')); if (ui[next]) ui[next].classList.add('active'); if (['running','aiming','firing'].includes(next)) ui.hud.classList.add('active'); if (next === 'menu') updateMenu(); }
+function setState(next) { state = next; shell.dataset.state = next; Object.values(ui).forEach(x => x.classList.remove('active')); if (ui[next]) ui[next].classList.add('active'); if (['running','aiming','firing'].includes(next)) ui.hud.classList.add('active'); if (next === 'menu') updateMenu(); }
 
 function renderShop() {
   const list = $('#cosmetic-list'); list.innerHTML = '';
@@ -299,7 +380,7 @@ function renderShop() {
 }
 
 let audioCtx;
-function sound(type) { if (save.muted) return; audioCtx ||= new (window.AudioContext || window.webkitAudioContext)(); const t = audioCtx.currentTime; const osc = audioCtx.createOscillator(), gain = audioCtx.createGain(); const types = { gate:[520,880,.12,'sine'],hit:[130,70,.18,'sawtooth'],ready:[320,560,.22,'triangle'],launch:[180,520,.32,'sawtooth'],pop:[220,150,.08,'square'],crush:[100,55,.16,'sawtooth'],coin:[800,1200,.12,'sine'],victory:[440,880,.55,'triangle'] }; const p = types[type] || types.pop; osc.type = p[3]; osc.frequency.setValueAtTime(p[0],t); osc.frequency.exponentialRampToValueAtTime(p[1],t+p[2]); gain.gain.setValueAtTime(.0001,t); gain.gain.exponentialRampToValueAtTime(type==='hit'?.12:.07,t+.01); gain.gain.exponentialRampToValueAtTime(.0001,t+p[2]); osc.connect(gain).connect(audioCtx.destination); osc.start(t); osc.stop(t+p[2]+.02); }
+function sound(type) { if (save.muted) return; audioCtx ||= new (window.AudioContext || window.webkitAudioContext)(); const t = audioCtx.currentTime; const osc = audioCtx.createOscillator(), gain = audioCtx.createGain(); const types = { gate:[520,920,.14,'sine'],multiply:[290,1180,.28,'triangle'],hit:[135,62,.2,'sawtooth'],ready:[320,590,.24,'triangle'],launch:[170,540,.34,'sawtooth'],pop:[235,145,.085,'square'],crush:[105,48,.2,'sawtooth'],coin:[820,1320,.13,'sine'],victory:[440,940,.58,'triangle'] }; const p = types[type] || types.pop; osc.type = p[3]; osc.detune.value = (Math.random() - .5) * (type === 'pop' ? 90 : 35); osc.frequency.setValueAtTime(p[0],t); osc.frequency.exponentialRampToValueAtTime(p[1],t+p[2]); gain.gain.setValueAtTime(.0001,t); gain.gain.exponentialRampToValueAtTime(type==='hit'||type==='crush'?.12:.072,t+.01); gain.gain.exponentialRampToValueAtTime(.0001,t+p[2]); osc.connect(gain).connect(audioCtx.destination); osc.start(t); osc.stop(t+p[2]+.02); }
 const haptic = pattern => navigator.vibrate?.(pattern);
 function updateMute() { $('#mute-menu').textContent = save.muted ? '×' : '♪'; }
 
@@ -321,9 +402,10 @@ function resize() { const w = shell.clientWidth, h = shell.clientHeight; rendere
 window.addEventListener('resize', resize); resize();
 
 function animate() {
-  requestAnimationFrame(animate); const dt = Math.min(.033, clock.getDelta()), t = clock.elapsedTime;
+  requestAnimationFrame(animate); const realDt = Math.min(.033, clock.getDelta()), t = clock.elapsedTime; if (slowMo > 0) slowMo = Math.max(0, slowMo - realDt); const dt = realDt * (slowMo > 0 ? .3 : 1);
   if (state === 'running') updateRun(dt, t); else if (state === 'aiming') { updateBallInstances(t); camera.position.z = lerp(camera.position.z, -214.5, dt * 2); camera.position.y = lerp(camera.position.y, 8.2, dt * 2); camera.lookAt(pointer.aimX * 2, 2.8, -240); } else if (state === 'firing') updateFinale(dt);
   if (state === 'menu') { camera.position.x = Math.sin(t*.25)*3.5; camera.position.y = 9 + Math.sin(t*.4)*.4; camera.position.z = 17; camera.lookAt(0,0,-15); }
+  for (const child of deco.children) if (child.userData.baseY !== undefined) { child.position.y = child.userData.baseY + Math.sin(t * .55 + child.userData.float) * .35; child.rotation.z += realDt * .08; }
   updateParticles(dt); if (shake > 0) { const s = shake * .18; camera.position.x += (Math.random()-.5)*s; camera.position.y += (Math.random()-.5)*s; shake = Math.max(0, shake-dt*1.7); }
   renderer.render(scene,camera);
 }

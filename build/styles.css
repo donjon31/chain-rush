@@ -5,3 +5,35 @@
 @media (max-height:700px){.logo{top:8%}.menu-card{bottom:4%}.result-panel{transform:scale(.9)}}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 .aim-ui{bottom:18%}
+
+/* Professional arcade polish */
+#game-shell:before,#game-shell:after{content:'';position:absolute;z-index:8;left:0;right:0;height:0;background:linear-gradient(#120b2f,#211047);transition:height .35s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+#game-shell:before{top:0}#game-shell:after{bottom:0;background:linear-gradient(#211047,#120b2f)}
+#game-shell[data-state="firing"]:before,#game-shell[data-state="firing"]:after{height:2.1%}
+#vignette{background:radial-gradient(circle at 50% 46%,transparent 42%,rgba(29,13,80,.16) 78%,rgba(20,8,55,.38) 100%),linear-gradient(180deg,rgba(30,12,91,.18),transparent 26%,transparent 72%,rgba(28,11,70,.28))}
+#impact-flash{position:absolute;z-index:7;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,#fff9,transparent 58%);opacity:0;transition:opacity .16s}
+#impact-flash.show{opacity:1;transition:opacity .03s}
+.hud-top{gap:10px;filter:drop-shadow(0 8px 14px #22105a42)}
+.level-badge{padding:10px 13px;border-radius:15px;background:linear-gradient(145deg,#2a1a61ed,#171039ed);border:1px solid #ffffffb0;box-shadow:inset 0 1px 0 #ffffff4d,0 8px 18px #21115d55}
+.progress{height:13px;background:#160d3c99;border:1px solid #ffffff9e;box-shadow:inset 0 2px 5px #0b062b80,0 4px 12px #1e0f5350}
+.progress i{background:linear-gradient(90deg,#32e6ff,#7affdb 55%,#ffe95a);box-shadow:0 0 12px #48e8ff}
+.progress span{width:19px;height:19px;border-width:4px;box-shadow:0 0 0 3px #ffffff3d,0 3px 10px #301264}
+.icon-btn{background:linear-gradient(145deg,#fff,#e8e5ff);border:1px solid #fff;box-shadow:inset 0 -3px 0 #d4cff0,0 9px 20px #27135d4f;transition:transform .16s}
+.icon-btn:active{transform:scale(.92)}
+.ball-badge{top:11.5%;min-width:84px;justify-content:center;padding:8px 16px;background:linear-gradient(145deg,#261653f2,#110b2ff2);border:1px solid #ffffffd6;box-shadow:inset 0 1px 0 #ffffff4d,0 9px 22px #1d0a5570;font-size:18px}
+.ball-badge span{color:#55eaff;text-shadow:0 0 10px #35dfff}
+.ball-badge.pop{animation:counter-pop .38s cubic-bezier(.2,1.8,.4,1)}
+.toast{top:20%;font-size:38px;letter-spacing:-.03em;filter:drop-shadow(0 8px 14px #24105770)}
+.combo-callout{position:absolute;z-index:6;top:27%;left:50%;width:92%;transform:translate(-50%,-12px) scale(.7) rotate(-2deg);text-align:center;opacity:0;pointer-events:none;transition:.24s cubic-bezier(.2,1.5,.4,1);filter:drop-shadow(0 9px 15px #26105f66)}
+.combo-callout.show{opacity:1;transform:translate(-50%,0) scale(1) rotate(-2deg)}
+.combo-callout b{display:block;font-size:clamp(28px,9vw,48px);font-weight:900;line-height:.9;letter-spacing:-.04em;color:#fff;text-shadow:0 4px 0 #4b229c,0 7px 0 #26105a;-webkit-text-stroke:1px #fff}
+.combo-callout span{display:inline-block;margin-top:10px;padding:5px 12px;border-radius:99px;background:#22144bdd;border:1px solid #fff9;font-size:9px;font-weight:900;letter-spacing:.18em}
+.combo-callout.chain b{color:#79ffe0}.combo-callout.mega b{color:#ffe653;font-size:clamp(34px,10vw,54px)}.combo-callout.anticipation b{color:#fff}.combo-callout.impact b{color:#ffeff8}
+.destruction-ui>b{font-size:36px;line-height:1;text-shadow:0 3px 0 #3a176f,0 8px 16px #221150}.destruction-ui>div{height:13px;background:#160d3ca8;border:1px solid #ffffffb8;box-shadow:inset 0 2px 5px #0c0627,0 5px 14px #24115866}.destruction-ui i{background:linear-gradient(90deg,#ff3c92,#ff8c5c,#ffe44d);box-shadow:0 0 14px #ff6d75}
+.glass{background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(239,235,255,.82));border:1px solid #fff;box-shadow:0 24px 60px #2b126c66,inset 0 1px 0 #fff,inset 0 -1px 0 #d9d1f5}
+.result-panel{border-radius:32px}.result-panel h2{background:linear-gradient(90deg,#39206f,#ff3f91);-webkit-background-clip:text;background-clip:text;color:transparent}
+.destruction-ring{box-shadow:0 14px 34px #4c23723d,0 0 0 7px #fff8}.stats-grid div{border:1px solid #fff;background:linear-gradient(145deg,#f5f2ff,#e9e5f9);box-shadow:inset 0 -2px 0 #dcd5f2}
+.primary-btn{overflow:hidden}.primary-btn:before{content:'';position:absolute;inset:0;background:linear-gradient(110deg,transparent 25%,#fff5 45%,transparent 65%);transform:translateX(-140%);animation:button-shine 2.8s ease-in-out infinite}
+@keyframes counter-pop{45%{transform:translateX(-50%) scale(1.34)}100%{transform:translateX(-50%) scale(1)}}
+@keyframes button-shine{0%,55%{transform:translateX(-140%)}85%,100%{transform:translateX(140%)}}
+@media (prefers-reduced-motion:reduce){.primary-btn:before{display:none}}
