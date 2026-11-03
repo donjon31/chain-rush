@@ -58,6 +58,9 @@ const obstacleMat = glossy(0xff3f72, .1, .22);
 const ballGeo = new THREE.SphereGeometry(.29, 12, 10);
 const ballMesh = new THREE.InstancedMesh(ballGeo, glossy(0x7656ff, .12, .16), MAX_BALLS);
 ballMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); ballMesh.castShadow = true; ballMesh.receiveShadow = true; ballMesh.count = 0;
+// Instance transforms move with the runner every frame. Three's cached aggregate
+// bounds otherwise remain behind and can incorrectly cull the whole ball army.
+ballMesh.frustumCulled = false;
 const dummy = new THREE.Object3D();
 
 function cosmeticMaterial() {
