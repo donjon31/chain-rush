@@ -1,0 +1,11 @@
+{
+  "name": "chain-rush",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve dist -l 4173",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

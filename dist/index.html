@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#5b35ef">
+  <meta name="description" content="CHAIN RUSH — grow your ball army, pick the best gates, and smash the tower.">
+  <title>CHAIN RUSH</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head>
+<body>
+  <main id="game-shell" aria-label="CHAIN RUSH game">
+    <canvas id="game-canvas"></canvas>
+    <div id="vignette"></div>
+
+    <section id="menu" class="screen active">
+      <div class="menu-top"><button id="mute-menu" class="icon-btn" aria-label="Toggle sound">♪</button></div>
+      <div class="logo" aria-label="CHAIN RUSH"><span>CHAIN</span><strong>RUSH</strong><i></i></div>
+      <p class="tagline">GROW. AIM. <b>DESTROY.</b></p>
+      <div class="menu-card glass">
+        <div class="level-pill">LEVEL <b id="menu-level">1</b></div>
+        <button id="play-btn" class="primary-btn"><span>PLAY</span><small>DRAG TO STEER</small></button>
+        <div class="menu-row">
+          <button id="shop-btn" class="secondary-btn"><span>◉</span> COSMETICS</button>
+          <div class="coin-chip">● <b id="menu-coins">0</b></div>
+        </div>
+      </div>
+      <p class="best-label">BEST <b id="menu-best">0</b></p>
+    </section>
+
+    <section id="hud" class="screen game-ui" aria-live="polite">
+      <div class="hud-top">
+        <div class="level-badge">LV <b id="hud-level">1</b></div>
+        <div class="progress"><i id="progress-fill"></i><span id="progress-dot"></span></div>
+        <button id="pause-btn" class="icon-btn" aria-label="Pause">Ⅱ</button>
+      </div>
+      <div id="ball-badge" class="ball-badge"><span>●</span><b id="ball-count">12</b></div>
+      <div id="toast" class="toast"></div>
+      <div id="aim-ui" class="aim-ui">
+        <p>DRAG TO AIM</p><div class="aim-arrow">↑</div><small>RELEASE TO LAUNCH</small>
+      </div>
+      <div id="destruction-ui" class="destruction-ui">
+        <span>DESTRUCTION</span><b id="destroy-percent">0%</b><div><i id="destroy-fill"></i></div>
+      </div>
+    </section>
+
+    <section id="pause" class="screen overlay-screen">
+      <div class="panel glass"><p class="eyebrow">TAKE A BREATH</p><h2>PAUSED</h2><button id="resume-btn" class="primary-btn">RESUME</button><button data-home class="text-btn">QUIT TO MENU</button></div>
+    </section>
+
+    <section id="results" class="screen overlay-screen">
+      <div class="result-rays"></div>
+      <div class="panel result-panel glass">
+        <p class="eyebrow">TOWER CLEARED</p><h2 id="result-title">CRUSHED IT!</h2>
+        <div class="destruction-ring" id="result-ring"><div><b id="result-destroy">0%</b><span>DESTROYED</span></div></div>
+        <div class="stats-grid">
+          <div><span>BALLS</span><b id="result-balls">0</b></div><div><span>COINS</span><b class="gold">+<i id="result-coins">0</i></b></div><div class="wide"><span>FINAL SCORE</span><b id="result-score">0</b></div>
+        </div>
+        <button id="next-btn" class="primary-btn">NEXT LEVEL <span>›</span></button>
+        <div class="result-actions"><button id="replay-btn" class="secondary-btn">↻ REPLAY</button><button id="share-btn" class="secondary-btn">↗ SHARE</button></div>
+        <button data-home class="text-btn">HOME</button>
+      </div>
+    </section>
+
+    <section id="shop" class="screen overlay-screen shop-screen">
+      <div class="panel glass shop-panel">
+        <div class="panel-head"><div><p class="eyebrow">YOUR STYLE</p><h2>BALL LAB</h2></div><button id="close-shop" class="icon-btn">×</button></div>
+        <div class="shop-balance">● <b id="shop-coins">0</b> COINS</div>
+        <div id="cosmetic-list" class="cosmetic-list"></div>
+      </div>
+    </section>
+
+    <div id="rotate-note">CHAIN RUSH PLAYS BEST IN PORTRAIT</div>
+  </main>
+  <script type="module" src="./js/game.js"></script>
+</body>
+</html>
