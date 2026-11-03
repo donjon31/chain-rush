@@ -8,6 +8,7 @@ const shell = $('#game-shell');
 const ui = Object.fromEntries(['menu','hud','pause','results','shop'].map(id => [id, $(`#${id}`)]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
+const MAX_RENDERED_BALLS = 620;
 
 const defaults = { level: 1, coins: 0, best: 0, selected: 'classic', owned: ['classic'], muted: false };
 let save;
@@ -52,9 +53,12 @@ const world = new THREE.Group(); scene.add(world);
 const deco = new THREE.Group(); scene.add(deco);
 let state = 'menu', levelData, runGroup, towerGroup, gateObjects = [], obstacleObjects = [], blocks = [], shots = [], particles = [], particlePool = [];
 let ballCount = 12, runZ = 0, targetX = 0, groupX = 0, fired = false, finishTimer = 0, destroyed = 0, combo = 0, maxCombo = 0, lastDestroyAt = 0, shake = 0, cameraImpulse = 0, levelStartBalls = 0;
-let targetDestroy = 0, displayedDestroy = 0, slowMo = 0, finaleWarned = false, growthWave = 0;
+let targetDestroy = 0, displayedDestroy = 0, slowMo = 0, finaleWarned = false, growthWave = 0, perfectCelebrated = false;
 let ballMembers = [];
-let pointer = { down: false, x: 0, y: 0, startX: 0, startY: 0, aimX: 0, aimY: .18 };
+let pointer = { down: false, id: null, moved: false, x: 0, y: 0, startX: 0, startY: 0, aimX: 0, aimY: .2 };
+const aimTarget = new THREE.Vector3(0, 2.8, -240);
+const aimRaycaster = new THREE.Raycaster();
+const towerPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 240);
 const clock = new THREE.Clock();
 
 const glossy = (color, metal = .08, rough = .21, emissive = 0x000000) => new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: rough, emissive, emissiveIntensity: .35 });
@@ -65,7 +69,7 @@ const lossMat = glossy(0xff496d, .02, .2, 0x7a0e26);
 const obstacleMat = glossy(0xff3f72, .1, .22);
 const ballGeo = new THREE.SphereGeometry(.3, lowPower ? 10 : 14, lowPower ? 8 : 12);
 const ballMaterial = new THREE.MeshPhysicalMaterial({ color: 0x7656ff, metalness: .16, roughness: .13, clearcoat: 1, clearcoatRoughness: .1, emissive: 0x000000, emissiveIntensity: .35 });
-const ballMesh = new THREE.InstancedMesh(ballGeo, ballMaterial, MAX_BALLS);
+const ballMesh = new THREE.InstancedMesh(ballGeo, ballMaterial, MAX_RENDERED_BALLS);
 ballMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); ballMesh.castShadow = true; ballMesh.receiveShadow = true; ballMesh.count = 0;
 // Instance transforms move with the runner every frame. Three's cached aggregate
 // bounds otherwise remain behind and can incorrectly cull the whole ball army.
@@ -175,7 +179,7 @@ function createTower() {
 
 function createLevel(level, replay = false) {
   shots.forEach(mesh => world.remove(mesh)); particles.forEach(mesh => world.remove(mesh)); clearGroup(runGroup); clearGroup(towerGroup); runGroup = new THREE.Group(); world.add(runGroup); gateObjects = []; obstacleObjects = []; shots = []; particles = [];
-  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = cameraImpulse = 0; targetDestroy = displayedDestroy = 0; slowMo = 0; finaleWarned = false;
+  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = cameraImpulse = 0; targetDestroy = displayedDestroy = 0; slowMo = 0; finaleWarned = false; perfectCelebrated = false; $('#confetti-layer').replaceChildren();
   createTrack(); levelData.gates.forEach(createGate); levelData.obstacles.forEach(createObstacle); createTower();
   runGroup.add(ballMesh); cosmeticMaterial(); updateBallInstances(0); setState('running'); updateHud();
   $('#destroy-percent').textContent = '0%'; $('#destroy-fill').style.width = '0%'; camera.position.set(0, 8.7, 14); camera.lookAt(0, 0, -8); track('level_start', { level, replay });
@@ -191,20 +195,21 @@ function makeFormation(count) {
 }
 
 function resetBallFormation(count) {
-  ballMembers = makeFormation(Math.max(1, Math.min(MAX_BALLS, count)));
-  ballCount = ballMembers.length;
+  ballCount = Math.max(1, Math.min(MAX_BALLS, Math.floor(count)));
+  ballMembers = makeFormation(Math.min(MAX_RENDERED_BALLS, ballCount));
 }
 
 function growBallFormation(count) {
-  const next = Math.max(1, Math.min(MAX_BALLS, count)), targets = makeFormation(next), now = clock.elapsedTime, previous = ballMembers.length;
-  for (let i = 0; i < next; i++) {
+  const next = Math.max(1, Math.min(MAX_BALLS, Math.floor(count))), visualNext = Math.min(MAX_RENDERED_BALLS, next), targets = makeFormation(visualNext), now = clock.elapsedTime, previous = ballMembers.length;
+  if (ballMembers.length > visualNext) ballMembers.length = visualNext;
+  for (let i = 0; i < visualNext; i++) {
     if (i < previous) {
       ballMembers[i].tx = targets[i].x; ballMembers[i].tz = targets[i].z; ballMembers[i].popUntil = now + .42;
     } else {
       ballMembers.push({ x: (Math.random() - .5) * .35, z: .2 + Math.random() * .25, tx: targets[i].x, tz: targets[i].z, phase: i * .7, birth: now + (i - previous) * .0045, popUntil: now + .5 });
     }
   }
-  ballCount = ballMembers.length; growthWave = .7;
+  ballCount = next; growthWave = .7;
 }
 
 function updateBallInstances(time) {
@@ -234,9 +239,11 @@ function obstacleHit(ob, impactWorldX) {
   if (ob.userData.hit) return; ob.userData.hit = true;
   const requested = Math.max(2, Math.floor(ballCount * (.12 + levelData.level * .006))), loss = Math.min(requested, ballCount - 1);
   const impact = { x: impactWorldX - groupX, z: -.72 };
-  const removedSet = new Set(impactRemovalIndices(ballMembers, impact, loss));
+  const visualLoss = Math.min(ballMembers.length - 1, Math.max(1, Math.round(loss / ballCount * ballMembers.length)));
+  const removedSet = new Set(impactRemovalIndices(ballMembers, impact, visualLoss));
   const removed = ballMembers.filter((_, index) => removedSet.has(index));
-  ballMembers = ballMembers.filter((_, index) => !removedSet.has(index)); ballCount = ballMembers.length;
+  ballMembers = ballMembers.filter((_, index) => !removedSet.has(index)); ballCount = Math.max(1, ballCount - loss);
+  const targets = makeFormation(Math.min(MAX_RENDERED_BALLS, ballCount)); ballMembers.forEach((member, index) => { member.tx = targets[index]?.x ?? member.tx; member.tz = targets[index]?.z ?? member.tz; });
   removed.forEach((member, i) => {
     const mesh = new THREE.Mesh(ballGeo, ballMesh.material); mesh.position.set(groupX + member.x, .25, runZ + member.z); mesh.userData.vel = new THREE.Vector3((member.x - impact.x) * 2.5 + (Math.random() - .5) * 2, 2.8 + Math.random() * 2.5, 2 + Math.random() * 2); mesh.userData.life = mesh.userData.maxLife = .65 + Math.random() * .35; mesh.userData.poolable = false; mesh.userData.startScale = .9; mesh.scale.setScalar(.9); world.add(mesh); particles.push(mesh);
   });
@@ -277,18 +284,19 @@ function updateRun(dt, t) {
 }
 
 function beginAim() {
-  state = nextState(state, 'FINISH_RUN'); shell.dataset.state = 'aiming'; runZ = -226; targetX = groupX = 0; updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.add('active'); setProgress(1);
+  state = nextState(state, 'FINISH_RUN'); shell.dataset.state = 'aiming'; runZ = -226; targetX = groupX = 0; pointer = { ...pointer, down: false, id: null, moved: false, aimX: 0, aimY: .2 };
+  lockAimTarget(new THREE.Vector3(0, Math.max(1.2, (levelData.tower.rows - 1) * .465), -240)); updateAimUI(); updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.remove('active'); setProgress(1);
   showCallout('AIM & SMASH!', `${ballCount} BALL VOLLEY`, 'anticipation'); sound('ready'); haptic([25, 30, 25]); track('finale_ready', { balls: ballCount });
 }
 
 function fireVolley() {
-  if (fired || state !== 'aiming') return; fired = true; state = nextState(state, 'FIRE'); shell.dataset.state = 'firing'; $('#aim-ui').classList.remove('active'); ballMesh.count = 0;
-  const visualCount = Math.min(130, ballCount), power = 16 + Math.min(8, ballCount / 28);
+  if (fired || state !== 'aiming') return; fired = true; state = nextState(state, 'FIRE'); shell.dataset.state = 'firing'; $('#aim-ui').classList.remove('active'); $('#destruction-ui').classList.add('active'); ballMesh.count = 0;
+  const visualCount = Math.min(220, ballCount, Math.max(45, Math.ceil(Math.sqrt(ballCount) * 10)));
   for (let i = 0; i < visualCount; i++) {
     const mesh = new THREE.Mesh(ballGeo, ballMesh.material); mesh.scale.setScalar(.82 + (i % 5) * .035); mesh.castShadow = true;
     mesh.position.set((Math.random() - .5) * 2.2, .3 + Math.random() * .8, -225 + (Math.random() - .5) * 1.6);
-    const dir = new THREE.Vector3(pointer.aimX * .48 + (Math.random() - .5) * .08, .19 + pointer.aimY * .18 + Math.random() * .05, -1).normalize();
-    mesh.userData.vel = dir.multiplyScalar(power * (.88 + Math.random() * .22)); mesh.userData.life = 0; mesh.userData.damage = Math.max(1, ballCount / visualCount); world.add(mesh); shots.push(mesh);
+    const flightTime = .62 + Math.random() * .13, target = aimTarget.clone(); target.x += (Math.random() - .5) * .5; target.y += (Math.random() - .5) * .42; target.z += (Math.random() - .5) * .34;
+    mesh.userData.vel = target.sub(mesh.position).divideScalar(flightTime); mesh.userData.vel.y += 3.4 * flightTime; mesh.userData.life = 0; mesh.userData.damage = Math.max(1, ballCount / visualCount); world.add(mesh); shots.push(mesh);
   }
   finishTimer = 0; sound('launch'); haptic(70); shake = .2; cameraImpulse = .35; showCallout('VOLLEY AWAY!', `${ballCount} BALLS`, 'impact'); track('volley_fired', { balls: ballCount });
 }
@@ -303,20 +311,34 @@ function hitBlock(block, shot) {
   if (combo === 5) showCallout('CHAIN REACTION!', '×5 COMBO', 'chain');
   if (combo === 10) { showCallout('MEGA CRUSH!', '×10 COMBO', 'mega'); slowMo = .22; haptic([38, 20, 60]); }
   if (targetDestroy >= 95 && !towerGroup.userData.totalCalled) { towerGroup.userData.totalCalled = true; showCallout('TOTAL DESTRUCTION!', 'TOWER OBLITERATED', 'mega'); slowMo = .28; }
+  if (targetDestroy >= 99.5) celebratePerfect();
+  const hitPower = Math.max(1, shot?.userData?.damage || 1), blastRadius = 1.6 + Math.min(1.3, Math.log2(hitPower + 1) * .28), blastChance = Math.min(.72, .12 + combo * .014 + Math.log2(hitPower + 1) * .1);
   blocks.forEach(b => {
     if (!b.userData.alive || b.userData.delay > 0) return;
     const dx = Math.abs(b.position.x - block.position.x), dz = Math.abs(b.position.z - block.position.z), dy = b.position.y - block.position.y;
     const directlyAbove = dy > .35 && dy < 1.35 && dx < 1.05 && dz < .95;
-    const shockNeighbor = combo >= 4 && b.position.distanceTo(block.position) < 1.65 && Math.random() < .12 + Math.min(.18, combo * .012);
+    const shockNeighbor = b.position.distanceTo(block.position) < blastRadius && Math.random() < blastChance;
     if (directlyAbove || shockNeighbor) { b.userData.delay = .05 + Math.random() * .16; b.userData.chainFrom = shot; }
   });
+  if (ballCount >= blocks.length && targetDestroy >= 18 && !towerGroup.userData.overwhelmed) {
+    towerGroup.userData.overwhelmed = true; showCallout('OVERWHELM!', `${ballCount} BALL POWER`, 'mega'); haptic([45,25,75]);
+    blocks.forEach(b => { if (b.userData.alive && b.userData.delay <= 0) { b.userData.delay = .08 + Math.random() * .7; b.userData.chainFrom = shot; } });
+  }
 }
 
 function updateFinale(dt) {
   finishTimer += dt; camera.position.x = lerp(camera.position.x, Math.sin(finishTimer * .6) * .45, 1 - Math.exp(-dt * 2)); camera.position.y = lerp(camera.position.y, 7.6 - Math.min(1, targetDestroy / 100), 1 - Math.exp(-dt * 2)); camera.position.z = lerp(camera.position.z, -215.3 + cameraImpulse, 1 - Math.exp(-dt * 2)); camera.lookAt(0, 2.8, -240); cameraImpulse = lerp(cameraImpulse, 0, 1 - Math.exp(-dt * 6));
   for (let i = shots.length - 1; i >= 0; i--) {
     const s = shots[i]; s.userData.life += dt; s.userData.vel.y -= 6.8 * dt; s.position.addScaledVector(s.userData.vel, dt); s.rotation.x += dt * 9;
-    let hit = null; if (s.position.z < -235.2 && s.position.z > -244.5) for (const b of blocks) if (b.userData.alive && s.position.distanceTo(b.position) < 1.05) { hit = b; break; }
+    let hit = null;
+    if (s.position.z < -235.2 && s.position.z > -244.5) {
+      let nearestDistance = 1.42;
+      for (const b of blocks) {
+        if (!b.userData.alive) continue;
+        const distance = s.position.distanceTo(b.position);
+        if (distance < nearestDistance) { nearestDistance = distance; hit = b; }
+      }
+    }
     if (hit) { hitBlock(hit, s); world.remove(s); shots.splice(i, 1); continue; }
     if (s.position.y < -.5 || s.userData.life > 5) { world.remove(s); shots.splice(i, 1); }
   }
@@ -337,7 +359,7 @@ function updateFinale(dt) {
 function finishLevel() {
   state = nextState(state, 'SETTLED'); const pct = Math.round(destroyed / blocks.length * 100); const score = scoreRun({ balls: ballCount, destroyed: pct, combo: maxCombo, level: levelData.level }); const coins = coinsFor({ destroyed: pct, score });
   save.coins += coins; save.best = Math.max(save.best, score); save.level = Math.max(save.level, levelData.level + 1); persist();
-  $('#result-title').textContent = pct > 85 ? 'TOTAL MAYHEM!' : pct > 55 ? 'CRUSHED IT!' : 'NICE HIT!'; $('#result-destroy').textContent = `${pct}%`; $('#result-balls').textContent = ballCount; $('#result-coins').textContent = coins; $('#result-score').textContent = score.toLocaleString(); $('#result-ring').style.setProperty('--pct', pct);
+  $('#result-title').textContent = pct >= 100 ? 'PERFECT SMASH!' : pct > 85 ? 'TOTAL MAYHEM!' : pct > 55 ? 'CRUSHED IT!' : 'NICE HIT!'; $('#result-destroy').textContent = `${pct}%`; $('#result-balls').textContent = ballCount; $('#result-coins').textContent = coins; $('#result-score').textContent = score.toLocaleString(); $('#result-ring').style.setProperty('--pct', pct);
   setTimeout(() => setState('results'), 450); sound('victory'); haptic([60, 50, 80]); track('level_complete', { level: levelData.level, score, destruction: pct, coins });
 }
 
@@ -366,6 +388,14 @@ function updateParticles(dt) {
 
 function showToast(text, good = true) { const el = $('#toast'); el.textContent = text; el.className = `toast show ${good ? 'good' : 'bad'}`; clearTimeout(showToast.timer); showToast.timer = setTimeout(() => el.classList.remove('show'), 700); }
 function showCallout(title, subtitle = '', style = 'impact') { const el = $('#combo-callout'); el.querySelector('b').textContent = title; el.querySelector('span').textContent = subtitle; el.className = `combo-callout show ${style}`; clearTimeout(showCallout.timer); showCallout.timer = setTimeout(() => el.classList.remove('show'), 1050); const flash = $('#impact-flash'); flash.classList.add('show'); setTimeout(() => flash.classList.remove('show'), 110); }
+function celebratePerfect() {
+  if (perfectCelebrated) return; perfectCelebrated = true; const layer = $('#confetti-layer'); const colors = ['#ffe44d','#ff4b9f','#5cf5ff','#7bffbd','#8b62ff','#ffffff'];
+  for (let i = 0; i < (lowPower ? 58 : 92); i++) {
+    const piece = document.createElement('i'); piece.className = `confetti-piece ${i % 5 === 0 ? 'round' : i % 4 === 0 ? 'ribbon' : ''}`;
+    piece.style.setProperty('--color', colors[i % colors.length]); piece.style.setProperty('--x', `${(Math.random() - .5) * 520}px`); piece.style.setProperty('--drift', `${(Math.random() - .5) * 150}px`); piece.style.setProperty('--rise', `${90 + Math.random() * 240}px`); piece.style.setProperty('--fall', `${Math.random() * 180}px`); piece.style.setProperty('--spin', `${(Math.random() > .5 ? 1 : -1) * (540 + Math.random() * 1080)}deg`); piece.style.setProperty('--duration', `${1.45 + Math.random() * 1.15}s`); piece.style.animationDelay = `${Math.random() * .28}s`; layer.append(piece); setTimeout(() => piece.remove(), 3100);
+  }
+  showCallout('PERFECT!', '100% DESTRUCTION', 'mega'); haptic([80,35,80,35,140]); sound('victory'); shake = .72; slowMo = .4;
+}
 function setProgress(p) { const pct = p * 100; $('#progress-fill').style.width = `${pct}%`; $('#progress-dot').style.left = `${pct}%`; }
 function updateHud() { $('#ball-count').textContent = ballCount; $('#hud-level').textContent = levelData?.level || save.level; }
 function updateMenu() { $('#menu-level').textContent = save.level; $('#menu-coins').textContent = save.coins; $('#menu-best').textContent = save.best.toLocaleString(); $('#shop-coins').textContent = save.coins; renderShop(); updateMute(); }
@@ -385,12 +415,50 @@ const haptic = pattern => navigator.vibrate?.(pattern);
 function updateMute() { $('#mute-menu').textContent = save.muted ? '×' : '♪'; }
 
 function pointerPos(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * 2 - 1, y: -((e.clientY - r.top) / r.height * 2 - 1) }; }
-shell.addEventListener('pointerdown', e => { if (!['running','aiming'].includes(state) || e.target.closest?.('button')) return; shell.setPointerCapture(e.pointerId); const p = pointerPos(e); pointer = { ...pointer, down:true, x:p.x, y:p.y, startX:p.x, startY:p.y }; if (state === 'running') targetX = p.x * 4.3; sound('pop'); });
-shell.addEventListener('pointermove', e => { if (!pointer.down) return; const p = pointerPos(e), dx = p.x - pointer.x; pointer.x = p.x; pointer.y = p.y; if (state === 'running') targetX = clamp(targetX + dx * 7.5, -4.1, 4.1); if (state === 'aiming') { pointer.aimX = clamp((p.x - pointer.startX) * .95, -.82, .82); pointer.aimY = clamp((p.y - pointer.startY) * .75 + .18, .06, .7); camera.position.x = -pointer.aimX * 2; } });
-shell.addEventListener('pointerup', () => { if (!pointer.down) return; pointer.down = false; if (state === 'aiming') fireVolley(); });
+function lockAimTarget(point) {
+  const maxX = (levelData.tower.cols - 1) * .71 + .5, maxY = (levelData.tower.rows - 1) * .93 + .4;
+  point.x = clamp(point.x, -maxX, maxX); point.y = clamp(point.y, .35, maxY); point.z = -240;
+  let nearest = null, nearestDistance = 2.7;
+  for (const block of blocks) {
+    if (!block.userData.alive) continue;
+    const distance = Math.hypot(block.position.x - point.x, block.position.y - point.y) + Math.abs(block.position.z - point.z) * .08;
+    if (distance < nearestDistance) { nearest = block; nearestDistance = distance; }
+  }
+  aimTarget.copy(nearest ? nearest.position : point); pointer.aimX = aimTarget.x / Math.max(1, maxX); pointer.aimY = aimTarget.y / Math.max(1, maxY); $('#aim-reticle').classList.toggle('locked', Boolean(nearest));
+}
+function updateAimFromPointer(p) {
+  aimRaycaster.setFromCamera(new THREE.Vector2(p.x, p.y), camera); const worldPoint = new THREE.Vector3();
+  if (aimRaycaster.ray.intersectPlane(towerPlane, worldPoint)) lockAimTarget(worldPoint);
+  updateAimUI();
+}
+function updateAimUI() {
+  const reticle = $('#aim-reticle'), arrow = $('.aim-arrow'); if (!reticle) return;
+  const screen = aimTarget.clone().project(camera); reticle.style.left = `${clamp((screen.x + 1) * 50, 8, 92)}%`; reticle.style.top = `${clamp((1 - screen.y) * 50, 17, 67)}%`;
+  if (arrow) arrow.style.transform = `translateX(${pointer.aimX * 34}px) rotate(${pointer.aimX * 18}deg)`;
+}
+shell.addEventListener('pointerdown', e => {
+  if (!['running','aiming'].includes(state) || e.target.closest?.('button')) return;
+  e.preventDefault(); shell.setPointerCapture?.(e.pointerId); const p = pointerPos(e);
+  pointer = { ...pointer, down:true, id:e.pointerId, moved:false, x:p.x, y:p.y, startX:p.x, startY:p.y };
+  if (state === 'aiming') updateAimFromPointer(p);
+  sound('pop');
+});
+shell.addEventListener('pointermove', e => {
+  if (!pointer.down || (pointer.id !== null && e.pointerId !== pointer.id)) return;
+  e.preventDefault(); const p = pointerPos(e), dx = p.x - pointer.x, totalX = p.x - pointer.startX, totalY = p.y - pointer.startY;
+  pointer.x = p.x; pointer.y = p.y; pointer.moved ||= Math.hypot(totalX, totalY) > .035;
+  if (state === 'running') targetX = clamp(targetX + dx * 6.35, -4.1, 4.1);
+  if (state === 'aiming') updateAimFromPointer(p);
+});
+shell.addEventListener('pointerup', e => {
+  if (!pointer.down || (pointer.id !== null && e.pointerId !== pointer.id)) return;
+  e.preventDefault(); pointer.down = false; pointer.id = null;
+});
+shell.addEventListener('pointercancel', () => { pointer.down = false; pointer.id = null; });
 window.addEventListener('keydown', e => { if (state === 'running') { if (e.key === 'ArrowLeft' || e.key === 'a') targetX -= 1.2; if (e.key === 'ArrowRight' || e.key === 'd') targetX += 1.2; } if (state === 'aiming' && e.key === ' ') fireVolley(); });
 
 $('#play-btn').onclick = () => createLevel(save.level);
+$('#launch-btn').onclick = () => { if (state === 'aiming') fireVolley(); };
 $('#pause-btn').onclick = () => { if (state === 'running') { state = nextState(state,'PAUSE'); setState('pause'); } };
 $('#resume-btn').onclick = () => { state = nextState(state,'RESUME'); setState('running'); };
 $('#shop-btn').onclick = () => setState('shop'); $('#close-shop').onclick = () => setState('menu');
@@ -403,7 +471,7 @@ window.addEventListener('resize', resize); resize();
 
 function animate() {
   requestAnimationFrame(animate); const realDt = Math.min(.033, clock.getDelta()), t = clock.elapsedTime; if (slowMo > 0) slowMo = Math.max(0, slowMo - realDt); const dt = realDt * (slowMo > 0 ? .3 : 1);
-  if (state === 'running') updateRun(dt, t); else if (state === 'aiming') { updateBallInstances(t); camera.position.z = lerp(camera.position.z, -214.5, dt * 2); camera.position.y = lerp(camera.position.y, 8.2, dt * 2); camera.lookAt(pointer.aimX * 2, 2.8, -240); } else if (state === 'firing') updateFinale(dt);
+  if (state === 'running') updateRun(dt, t); else if (state === 'aiming') { updateBallInstances(t); camera.position.z = lerp(camera.position.z, -214.5, dt * 2); camera.position.y = lerp(camera.position.y, 8.2, dt * 2); camera.position.x = lerp(camera.position.x, -aimTarget.x * .12, dt * 2); camera.lookAt(aimTarget.x * .12, 2.8, -240); updateAimUI(); } else if (state === 'firing') updateFinale(dt);
   if (state === 'menu') { camera.position.x = Math.sin(t*.25)*3.5; camera.position.y = 9 + Math.sin(t*.4)*.4; camera.position.z = 17; camera.lookAt(0,0,-15); }
   for (const child of deco.children) if (child.userData.baseY !== undefined) { child.position.y = child.userData.baseY + Math.sin(t * .55 + child.userData.float) * .35; child.rotation.z += realDt * .08; }
   updateParticles(dt); if (shake > 0) { const s = shake * .18; camera.position.x += (Math.random()-.5)*s; camera.position.y += (Math.random()-.5)*s; shake = Math.max(0, shake-dt*1.7); }

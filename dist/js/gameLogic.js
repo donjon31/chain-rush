@@ -1,4 +1,4 @@
-export const MAX_BALLS = 420;
+export const MAX_BALLS = 5000;
 
 export function applyModifier(count, modifier) {
   const n = Math.max(0, Math.floor(Number(count) || 0));

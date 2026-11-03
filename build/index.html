@@ -4,8 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#5b35ef">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CHAIN RUSH">
+  <meta name="format-detection" content="telephone=no">
   <meta name="description" content="CHAIN RUSH — grow your ball army, pick the best gates, and smash the tower.">
   <title>CHAIN RUSH</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="stylesheet" href="./styles.css">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
@@ -15,6 +23,7 @@
     <canvas id="game-canvas"></canvas>
     <div id="vignette"></div>
     <div id="impact-flash"></div>
+    <div id="confetti-layer" aria-hidden="true"></div>
 
     <section id="menu" class="screen active">
       <div class="menu-top"><button id="mute-menu" class="icon-btn" aria-label="Toggle sound">♪</button></div>
@@ -41,7 +50,11 @@
       <div id="toast" class="toast"></div>
       <div id="combo-callout" class="combo-callout"><b></b><span></span></div>
       <div id="aim-ui" class="aim-ui">
-        <p>DRAG TO AIM</p><div class="aim-arrow">↑</div><small>RELEASE TO LAUNCH</small>
+        <div id="aim-reticle" class="aim-reticle"><i></i><b>LOCKED</b></div>
+        <div class="aim-controls">
+          <p>TAP THE TOWER TO AIM</p><div class="aim-arrow">↑</div><small>CROSSHAIR SNAPS TO A BLOCK</small>
+          <button id="launch-btn" class="launch-btn" type="button"><span>LAUNCH!</span><small>TAP TO SMASH</small></button>
+        </div>
       </div>
       <div id="destruction-ui" class="destruction-ui">
         <span>DESTRUCTION</span><b id="destroy-percent">0%</b><div><i id="destroy-fill"></i></div>
@@ -76,6 +89,9 @@
 
     <div id="rotate-note">CHAIN RUSH PLAYS BEST IN PORTRAIT</div>
   </main>
+  <script>
+    if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  </script>
   <script type="module" src="./js/game.js"></script>
 </body>
 </html>
