@@ -87,3 +87,14 @@ test('installable app metadata uses standalone portrait mode and valid icons', a
     assert.ok(info.size > 1000);
   }
 });
+
+test('mobile performance and recovery safeguards stay enabled', async () => {
+  const game = await readFile(new URL('../dist/js/game.js', import.meta.url), 'utf8');
+  const serviceWorker = await readFile(new URL('../dist/sw.js', import.meta.url), 'utf8');
+  assert.match(game, /THREE\.InstancedMesh/);
+  assert.match(game, /visibilitychange/);
+  assert.match(game, /webglcontextlost/);
+  assert.match(game, /qualityProfiles/);
+  assert.match(game, /particleLimit/);
+  assert.match(serviceWorker, /three\.module\.js/);
+});

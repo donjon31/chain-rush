@@ -16,11 +16,13 @@
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" crossorigin>
   <link rel="stylesheet" href="./styles.css">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
 </head>
 <body>
   <main id="game-shell" aria-label="CHAIN RUSH game">
+    <div id="loading-screen" class="loading-screen" role="status" aria-live="polite"><div class="loading-logo"><b>CHAIN</b><strong>RUSH</strong></div><i></i><span id="loading-status">LOADING ENGINE</span></div>
     <canvas id="game-canvas"></canvas>
     <div id="vignette"></div>
     <div id="impact-flash"></div>
@@ -93,13 +95,24 @@
         <div class="panel-head"><div><p class="eyebrow">GAME OPTIONS</p><h2>SETTINGS</h2></div><button id="close-settings" class="icon-btn" aria-label="Close settings">×</button></div>
         <button id="sound-setting" class="setting-row"><span>SOUND</span><b>ON</b></button>
         <button id="haptics-setting" class="setting-row"><span>HAPTICS</span><b>ON</b></button>
+        <button id="graphics-setting" class="setting-row"><span>GRAPHICS</span><b>AUTO</b></button>
       </div>
     </section>
 
     <div id="rotate-note">CHAIN RUSH PLAYS BEST IN PORTRAIT</div>
   </main>
   <script>
-    if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+    addEventListener('load', () => {
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+      // An older cached game bundle does not know about the new loader. Hide it only
+      // after that bundle has demonstrably activated the menu.
+      setTimeout(() => {
+        const loader = document.querySelector('#loading-screen');
+        if (loader && (document.querySelector('#game-shell')?.dataset.state || document.querySelector('#menu-screen')?.classList.contains('active'))) {
+          loader.classList.add('ready'); loader.hidden = true;
+        }
+      }, 300);
+    });
   </script>
   <script type="module" src="./js/game.js"></script>
 </body>
