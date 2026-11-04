@@ -1,7 +1,7 @@
-const CACHE = 'chain-rush-v10';
+const CACHE = 'chain-rush-v11';
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 const APP_SHELL = [
-  '/', '/index.html', '/styles.css', '/js/game.js', '/js/gameLogic.js',
+  '/', '/index.html', '/styles.css', '/js/game.js', '/js/gameLogic.js', '/js/analytics.js', '/js/analyticsLogic.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'
 ];
 

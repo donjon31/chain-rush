@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
 import { applyModifier, nextState, makeLevel, levelTuning, scoreRun, impactRemovalIndices, destructionPotential } from '../dist/js/gameLogic.js';
+import { classifyTraffic, retentionMilestones, durationBand, loadBand } from '../dist/js/analyticsLogic.js';
 
 test('gate modifiers are whole, nonnegative, and capped', () => {
   assert.equal(applyModifier(12, { op: '+', value: 25 }), 37);
@@ -97,4 +98,29 @@ test('mobile performance and recovery safeguards stay enabled', async () => {
   assert.match(game, /qualityProfiles/);
   assert.match(game, /particleLimit/);
   assert.match(serviceWorker, /three\.module\.js/);
+});
+
+test('privacy-safe analytics classifies social sources without storing full referrers', () => {
+  assert.equal(classifyTraffic({ href:'https://game.test/?utm_source=tiktok' }), 'tiktok');
+  assert.equal(classifyTraffic({ referrer:'https://www.youtube.com/watch?v=private' }), 'youtube');
+  assert.equal(classifyTraffic({ referrer:'https://reddit.com/r/games' }), 'reddit');
+  assert.equal(classifyTraffic({ href:'https://game.test/' }), 'direct');
+});
+
+test('analytics retention and performance buckets are deterministic', () => {
+  const day = 86400000;
+  assert.deepEqual(retentionMilestones(0, day, {}), ['day_1']);
+  assert.deepEqual(retentionMilestones(0, 7 * day, { day1:true }), ['day_7']);
+  assert.equal(durationBand(185), '3_10m');
+  assert.equal(loadBand(2400), '2_3s');
+});
+
+test('analytics is opt-in and exposes a reversible privacy control', async () => {
+  const analytics = await readFile(new URL('../dist/js/analytics.js', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../dist/index.html', import.meta.url), 'utf8');
+  assert.match(analytics, /consent !== 'granted'/);
+  assert.match(analytics, /va-disable/);
+  assert.match(analytics, /_vercel\/insights\/script\.js/);
+  assert.match(html, /id="privacy-setting"/);
+  assert.match(html, /id="analytics-decline"/);
 });

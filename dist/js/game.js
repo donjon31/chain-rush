@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { applyModifier, modifierLabel, makeLevel, scoreRun, coinsFor, nextState, impactRemovalIndices, destructionPotential, COSMETICS, MAX_BALLS } from './gameLogic.js';
+import { initAnalytics } from './analytics.js';
 
 const bootStartedAt = performance.now();
 const $ = (s) => document.querySelector(s);
@@ -16,9 +17,9 @@ let save;
 try { save = { ...defaults, ...JSON.parse(localStorage.getItem('chainRushSave') || '{}') }; } catch { save = { ...defaults }; }
 const persist = () => localStorage.setItem('chainRushSave', JSON.stringify(save));
 
-// Monetization and analytics extension points intentionally do nothing until real providers are connected.
+const analytics = initAnalytics();
 window.ChainRushProviders = Object.freeze({
-  analytics: { track: () => {} },
+  analytics,
   rewardedAds: { available: () => false, show: async () => ({ completed: false }) },
   purchases: { buy: async () => ({ verified: false }) },
   adRemoval: { active: () => false }
@@ -549,7 +550,7 @@ shell.addEventListener('pointerup', e => {
 shell.addEventListener('pointercancel', () => { pointer.down = false; pointer.id = null; $('#aim-reticle').classList.remove('dragging'); });
 window.addEventListener('keydown', e => { if (state === 'running') { if (e.key === 'ArrowLeft' || e.key === 'a') targetX -= 1.2; if (e.key === 'ArrowRight' || e.key === 'd') targetX += 1.2; } if (state === 'aiming' && e.key === ' ') fireVolley(); });
 
-$('#play-btn').onclick = () => createLevel(save.level);
+$('#play-btn').onclick = () => { track('play_clicked', { level:save.level }); createLevel(save.level); };
 $('#launch-btn').onclick = () => { if (state === 'aiming') fireVolley(); };
 $('#pause-btn').onclick = () => { if (state === 'running') { state = nextState(state,'PAUSE'); setState('pause'); } };
 $('#resume-btn').onclick = () => { state = nextState(state,'RESUME'); setState('running'); };
@@ -565,7 +566,7 @@ function resize() { const w = shell.clientWidth, h = shell.clientHeight; rendere
 window.addEventListener('resize', resize); resize();
 
 document.addEventListener('visibilitychange', () => { isPageVisible = !document.hidden; if (!isPageVisible) { if (state === 'running') setState('pause'); audioCtx?.suspend?.(); } else { clock.getDelta(); if (!save.muted) audioCtx?.resume?.(); } });
-canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); isPageVisible = false; const loading = $('#loading-screen'); loading.hidden = false; loading.classList.remove('ready'); loading.classList.add('context-lost'); $('#loading-status').textContent = 'RESTORING GRAPHICS'; });
+canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); track('game_error', { type:'webgl_context_lost' }); isPageVisible = false; const loading = $('#loading-screen'); loading.hidden = false; loading.classList.remove('ready'); loading.classList.add('context-lost'); $('#loading-status').textContent = 'RESTORING GRAPHICS'; });
 canvas.addEventListener('webglcontextrestored', () => { isPageVisible = true; applyQuality(quality); $('#loading-screen').classList.remove('context-lost'); hideLoading(); clock.getDelta(); });
 
 function animate(rafTime = 0) {
@@ -577,7 +578,7 @@ function animate(rafTime = 0) {
   renderer.render(scene,camera);
   if (!firstFrameRendered) { firstFrameRendered = true; shell.dataset.bootMs = Math.round(performance.now() - bootStartedAt); hideLoading(); }
   frameMetrics.elapsed += realDt; frameMetrics.frames++; frameMetrics.samples.push(realDt * 1000); if (frameMetrics.samples.length > 240) frameMetrics.samples.shift();
-  if (frameMetrics.elapsed >= 2) { const measuredFps = Math.round(frameMetrics.frames / frameMetrics.elapsed), sorted = [...frameMetrics.samples].sort((a,b) => a-b); shell.dataset.fps = measuredFps; shell.dataset.frameP95 = (sorted[Math.floor(sorted.length * .95)] || 0).toFixed(1); shell.dataset.frameMax = Math.max(...frameMetrics.samples, 0).toFixed(1); shell.dataset.drawCalls = renderer.info.render.calls; shell.dataset.triangles = renderer.info.render.triangles; if (save.graphics === 'auto' && state === 'running') { autoTuneElapsed += frameMetrics.elapsed; autoTuneFrames += frameMetrics.frames; if (autoTuneElapsed >= 6) { const average = autoTuneFrames / autoTuneElapsed; if (average < 44 && quality !== 'low') applyQuality(quality === 'high' ? 'medium' : 'low'); autoTuneElapsed = 0; autoTuneFrames = 0; } } frameMetrics.elapsed = 0; frameMetrics.frames = 0; }
+  if (frameMetrics.elapsed >= 2) { const measuredFps = Math.round(frameMetrics.frames / frameMetrics.elapsed), sorted = [...frameMetrics.samples].sort((a,b) => a-b); shell.dataset.fps = measuredFps; shell.dataset.frameP95 = (sorted[Math.floor(sorted.length * .95)] || 0).toFixed(1); shell.dataset.frameMax = Math.max(...frameMetrics.samples, 0).toFixed(1); shell.dataset.drawCalls = renderer.info.render.calls; shell.dataset.triangles = renderer.info.render.triangles; if (save.graphics === 'auto' && state === 'running') { autoTuneElapsed += frameMetrics.elapsed; autoTuneFrames += frameMetrics.frames; if (autoTuneElapsed >= 6) { const average = autoTuneFrames / autoTuneElapsed; if (average < 44 && quality !== 'low') { const from = quality, to = quality === 'high' ? 'medium' : 'low'; applyQuality(to); analytics.reportPerformance({ fps:average, quality:from, issue:`auto_downgrade_to_${to}` }); } autoTuneElapsed = 0; autoTuneFrames = 0; } } frameMetrics.elapsed = 0; frameMetrics.frames = 0; }
 }
 
-$('#loading-status').textContent = 'BUILDING SCENE'; createEnvironment(); runGroup = new THREE.Group(); world.add(runGroup); levelData = makeLevel(save.level); ballCount = levelData.startBalls; cosmeticMaterial(); updateMenu(); setState('menu'); applyQuality(quality); renderer.render(scene,camera); firstFrameRendered = true; shell.dataset.bootMs = Math.round(performance.now() - bootStartedAt); hideLoading(); animate();
+$('#loading-status').textContent = 'BUILDING SCENE'; createEnvironment(); runGroup = new THREE.Group(); world.add(runGroup); levelData = makeLevel(save.level); ballCount = levelData.startBalls; cosmeticMaterial(); updateMenu(); setState('menu'); applyQuality(quality); renderer.render(scene,camera); firstFrameRendered = true; shell.dataset.bootMs = Math.round(performance.now() - bootStartedAt); analytics.reportLoad(Number(shell.dataset.bootMs)); hideLoading(); animate();
