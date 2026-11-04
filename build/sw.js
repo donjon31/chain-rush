@@ -1,4 +1,4 @@
-const CACHE = 'chain-rush-v4';
+const CACHE = 'chain-rush-v5';
 const APP_SHELL = [
   '/', '/index.html', '/styles.css', '/js/game.js', '/js/gameLogic.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'

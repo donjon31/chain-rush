@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
-import { applyModifier, nextState, makeLevel, levelTuning, scoreRun, impactRemovalIndices } from '../dist/js/gameLogic.js';
+import { applyModifier, nextState, makeLevel, levelTuning, scoreRun, impactRemovalIndices, destructionPotential } from '../dist/js/gameLogic.js';
 
 test('gate modifiers are whole, nonnegative, and capped', () => {
   assert.equal(applyModifier(12, { op: '+', value: 25 }), 37);
@@ -37,7 +37,7 @@ test('difficulty grows in bounded tiers with sensible level durations', () => {
     assert.ok(tuning.speed <= 13.8);
     assert.ok(tuning.trackLength >= previous.trackLength);
     const seconds = tuning.trackLength / tuning.speed;
-    assert.ok(seconds >= 20 && seconds <= 50);
+    assert.ok(seconds >= 18 && seconds <= 34);
     previous = tuning;
   }
 });
@@ -62,6 +62,13 @@ test('score rewards destruction and combos', () => {
   const low = scoreRun({ balls: 20, destroyed: 20, combo: 1, level: 1 });
   const high = scoreRun({ balls: 20, destroyed: 90, combo: 6, level: 1 });
   assert.ok(high > low);
+});
+
+test('destruction rewards precise low-center aiming instead of guaranteeing 100 percent', () => {
+  const target = { balls: 420, maxX: 4, maxY: 6 };
+  assert.equal(destructionPotential({ ...target, aimX: 0, aimY: 6 * .28 }), 100);
+  assert.ok(destructionPotential({ ...target, aimX: 3.8, aimY: 5.6 }) < 40);
+  assert.ok(destructionPotential({ ...target, balls: 120, aimX: 0, aimY: 6 * .28 }) < 40);
 });
 
 test('obstacle damage removes balls nearest the physical impact', () => {

@@ -51,11 +51,21 @@ export function nextState(state, event) {
 
 export function levelTuning(index) {
   const level = Math.max(1, Math.floor(index));
-  if (level <= 5) return { speed: 8.8 + (level - 1) * .18, trackLength: 220 + (level - 1) * 8, gateCount: 5, obstacleCount: 4 + Math.floor((level - 1) / 2) };
-  if (level <= 15) return { speed: 9.8 + (level - 6) * .12, trackLength: 300 + (level - 6) * 8, gateCount: 6, obstacleCount: 6 + Math.floor((level - 6) / 4) };
-  if (level <= 30) return { speed: 10.9 + (level - 16) * .08, trackLength: 385 + (level - 16) * 7, gateCount: 7, obstacleCount: 8 + Math.floor((level - 16) / 6) };
-  if (level <= 50) return { speed: 12.1 + (level - 31) * .045, trackLength: 490 + (level - 31) * 3, gateCount: 8, obstacleCount: 10 };
-  return { speed: Math.min(13.8, 13 + (level - 51) * .025), trackLength: 550 + Math.min(50, (level - 51) * 2), gateCount: 8 + (level % 3 === 0 ? 1 : 0), obstacleCount: 11 };
+  if (level <= 5) return { speed: 8.8 + (level - 1) * .18, trackLength: 170 + (level - 1) * 6, gateCount: 5, obstacleCount: 4 + Math.floor((level - 1) / 2) };
+  if (level <= 15) return { speed: 9.8 + (level - 6) * .12, trackLength: 215 + (level - 6) * 5, gateCount: 6, obstacleCount: 6 + Math.floor((level - 6) / 4) };
+  if (level <= 30) return { speed: 10.9 + (level - 16) * .08, trackLength: 275 + (level - 16) * 4, gateCount: 7, obstacleCount: 8 + Math.floor((level - 16) / 6) };
+  if (level <= 50) return { speed: 12.1 + (level - 31) * .045, trackLength: 340 + (level - 31) * 2, gateCount: 8, obstacleCount: 10 };
+  return { speed: Math.min(13.8, 13 + (level - 51) * .025), trackLength: 390 + Math.min(40, (level - 51) * 1.5), gateCount: 8 + (level % 3 === 0 ? 1 : 0), obstacleCount: 11 };
+}
+
+export function destructionPotential({ balls, aimX, aimY, maxX, maxY }) {
+  const safeX = Math.max(1, Math.abs(maxX));
+  const safeY = Math.max(1, Math.abs(maxY));
+  const idealY = safeY * .28;
+  const distance = Math.hypot((aimX / safeX) * .82, ((aimY - idealY) / safeY) * 1.08);
+  const precision = Math.max(0, 1 - distance);
+  const ballPower = Math.min(1, Math.max(0, (Math.max(0, balls) - 20) / 400));
+  return Math.round(Math.min(100, Math.max(12, 12 + 88 * precision * ballPower)));
 }
 
 function deterministic(level, index, salt = 0) {

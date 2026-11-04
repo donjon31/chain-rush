@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { applyModifier, modifierLabel, makeLevel, scoreRun, coinsFor, nextState, impactRemovalIndices, COSMETICS, MAX_BALLS } from './gameLogic.js';
+import { applyModifier, modifierLabel, makeLevel, scoreRun, coinsFor, nextState, impactRemovalIndices, destructionPotential, COSMETICS, MAX_BALLS } from './gameLogic.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -52,7 +52,7 @@ const runnerRim = new THREE.PointLight(0x74eaff, 2.4, 18, 2); runnerRim.position
 const world = new THREE.Group(); scene.add(world);
 const deco = new THREE.Group(); scene.add(deco);
 let state = 'menu', levelData, runGroup, towerGroup, gateObjects = [], obstacleObjects = [], blocks = [], shots = [], particles = [], particlePool = [];
-let ballCount = 12, runZ = 0, targetX = 0, groupX = 0, fired = false, finishTimer = 0, destroyed = 0, combo = 0, maxCombo = 0, lastDestroyAt = 0, shake = 0, cameraImpulse = 0, levelStartBalls = 0;
+let ballCount = 12, runZ = 0, targetX = 0, groupX = 0, fired = false, finishTimer = 0, destroyed = 0, combo = 0, maxCombo = 0, lastDestroyAt = 0, shake = 0, cameraImpulse = 0, levelStartBalls = 0, destructionLimit = Infinity;
 let targetDestroy = 0, displayedDestroy = 0, slowMo = 0, finaleWarned = false, growthWave = 0, perfectCelebrated = false;
 let ballMembers = [];
 let pointer = { down: false, id: null, moved: false, x: 0, y: 0, startX: 0, startY: 0, aimX: 0, aimY: .2 };
@@ -208,7 +208,7 @@ function createTower() {
 
 function createLevel(level, replay = false) {
   shots.forEach(mesh => world.remove(mesh)); particles.forEach(mesh => world.remove(mesh)); clearGroup(runGroup); clearGroup(towerGroup); runGroup = new THREE.Group(); world.add(runGroup); gateObjects = []; obstacleObjects = []; shots = []; particles = [];
-  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = cameraImpulse = 0; targetDestroy = displayedDestroy = 0; slowMo = 0; finaleWarned = false; perfectCelebrated = false; $('#confetti-layer').replaceChildren();
+  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = cameraImpulse = 0; targetDestroy = displayedDestroy = 0; destructionLimit = Infinity; slowMo = 0; finaleWarned = false; perfectCelebrated = false; $('#confetti-layer').replaceChildren();
   createTrack(); levelData.gates.forEach(createGate); levelData.obstacles.forEach(createObstacle); createTower();
   runGroup.add(ballMesh); cosmeticMaterial(); updateBallInstances(0); setState('running'); updateHud();
   $('#destroy-percent').textContent = '0%'; $('#destroy-fill').style.width = '0%'; camera.position.set(0, 8.7, 14); camera.lookAt(0, 0, -8); track('level_start', { level, replay });
@@ -320,12 +320,16 @@ function updateRun(dt, t) {
 
 function beginAim() {
   state = nextState(state, 'FINISH_RUN'); shell.dataset.state = 'aiming'; runZ = levelData.finishZ - 12; targetX = groupX = 0; pointer = { ...pointer, down: false, id: null, moved: false, aimX: 0, aimY: .2 }; towerPlane.constant = -levelData.towerZ;
-  lockAimTarget(new THREE.Vector3(0, Math.max(1.2, (levelData.tower.rows - 1) * .465), levelData.towerZ)); updateAimUI(); updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.remove('active'); setProgress(1);
+  const maxY = (levelData.tower.rows - 1) * .93 + .4;
+  setAimTarget(new THREE.Vector3(0, maxY * .28, levelData.towerZ)); updateAimUI(); updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.remove('active'); setProgress(1);
   showCallout('AIM & SMASH!', `${ballCount} BALL VOLLEY`, 'anticipation'); sound('ready'); haptic([25, 30, 25]); track('finale_ready', { balls: ballCount });
 }
 
 function fireVolley() {
   if (fired || state !== 'aiming') return; fired = true; state = nextState(state, 'FIRE'); shell.dataset.state = 'firing'; $('#aim-ui').classList.remove('active'); $('#destruction-ui').classList.add('active'); ballMesh.count = 0;
+  const maxX = (levelData.tower.cols - 1) * .71 + .5, maxY = (levelData.tower.rows - 1) * .93 + .4;
+  const potential = destructionPotential({ balls: ballCount, aimX: aimTarget.x, aimY: aimTarget.y, maxX, maxY });
+  destructionLimit = Math.max(1, Math.floor(blocks.length * potential / 100));
   const visualCount = Math.min(220, ballCount, Math.max(45, Math.ceil(Math.sqrt(ballCount) * 10)));
   for (let i = 0; i < visualCount; i++) {
     const mesh = new THREE.Mesh(ballGeo, ballMesh.material); mesh.scale.setScalar(.82 + (i % 5) * .035); mesh.castShadow = true;
@@ -337,7 +341,7 @@ function fireVolley() {
 }
 
 function hitBlock(block, shot) {
-  if (!block.userData.alive) return; block.userData.alive = false; destroyed++;
+  if (!block.userData.alive || destroyed >= destructionLimit) return; block.userData.alive = false; destroyed++;
   const now = performance.now(); combo = now - lastDestroyAt < 450 ? combo + 1 : 1; lastDestroyAt = now; maxCombo = Math.max(maxCombo, combo);
   const incoming = shot?.userData?.vel || new THREE.Vector3(0, 2, -4); block.userData.vel.copy(incoming).multiplyScalar(.11 + Math.random() * .06); block.userData.vel.y += 3.4 + Math.random() * 3.2; block.userData.vel.x += (Math.random() - .5) * 3.6; block.userData.vel.z += (Math.random() - .5) * 2.4;
   burst(block.position.clone(), block.material.color.getHex(), 5); dust(block.position.clone(), combo > 7 ? 8 : 4);
@@ -347,6 +351,17 @@ function hitBlock(block, shot) {
   if (combo === 10) { showCallout('MEGA CRUSH!', '×10 COMBO', 'mega'); slowMo = .22; haptic([38, 20, 60]); }
   if (targetDestroy >= 95 && !towerGroup.userData.totalCalled) { towerGroup.userData.totalCalled = true; showCallout('TOTAL DESTRUCTION!', 'TOWER OBLITERATED', 'mega'); slowMo = .28; }
   if (targetDestroy >= 99.5) celebratePerfect();
+  if (!towerGroup.userData.skillCascade) {
+    towerGroup.userData.skillCascade = true;
+    const cascadeCount = Math.max(0, destructionLimit - destroyed);
+    blocks.filter(b => b.userData.alive).sort((a, b) => {
+      const score = item => Math.hypot(item.position.x - aimTarget.x, (item.position.y - aimTarget.y) * .72, (item.position.z - aimTarget.z) * .55);
+      return score(a) - score(b);
+    }).slice(0, cascadeCount).forEach((b, index) => {
+      b.userData.delay = .12 + Math.random() * .35 + index / Math.max(1, cascadeCount) * 1.15;
+      b.userData.chainFrom = shot;
+    });
+  }
   const hitPower = Math.max(1, shot?.userData?.damage || 1), blastRadius = 1.6 + Math.min(1.3, Math.log2(hitPower + 1) * .28), blastChance = Math.min(.72, .12 + combo * .014 + Math.log2(hitPower + 1) * .1);
   blocks.forEach(b => {
     if (!b.userData.alive || b.userData.delay > 0) return;
@@ -355,10 +370,6 @@ function hitBlock(block, shot) {
     const shockNeighbor = b.position.distanceTo(block.position) < blastRadius && Math.random() < blastChance;
     if (directlyAbove || shockNeighbor) { b.userData.delay = .05 + Math.random() * .16; b.userData.chainFrom = shot; }
   });
-  if (ballCount >= blocks.length && targetDestroy >= 18 && !towerGroup.userData.overwhelmed) {
-    towerGroup.userData.overwhelmed = true; showCallout('OVERWHELM!', `${ballCount} BALL POWER`, 'mega'); haptic([45,25,75]);
-    blocks.forEach(b => { if (b.userData.alive && b.userData.delay <= 0) { b.userData.delay = .08 + Math.random() * .7; b.userData.chainFrom = shot; } });
-  }
 }
 
 function updateFinale(dt) {
@@ -378,8 +389,8 @@ function updateFinale(dt) {
     if (s.position.y < -.5 || s.userData.life > 5) { world.remove(s); shots.splice(i, 1); }
   }
   for (const b of blocks) {
-    if (b.userData.delay > 0) { b.userData.delay -= dt; if (b.userData.delay <= 0) hitBlock(b, b.userData.chainFrom); }
-    if (b.userData.alive && b.position.y > .6 && b.userData.delay <= 0) {
+    if (destroyed < destructionLimit && b.userData.delay > 0) { b.userData.delay -= dt; if (b.userData.delay <= 0) hitBlock(b, b.userData.chainFrom); }
+    if (destroyed < destructionLimit && b.userData.alive && b.position.y > .6 && b.userData.delay <= 0) {
       const supported = blocks.some(s => s !== b && s.userData.alive && s.position.y < b.position.y && b.position.y - s.position.y < 1.18 && Math.abs(s.position.x - b.position.x) < .82 && Math.abs(s.position.z - b.position.z) < .92);
       b.userData.unsupported = supported ? 0 : b.userData.unsupported + dt;
       if (b.userData.unsupported > .14) hitBlock(b, { userData: { vel: new THREE.Vector3((Math.random() - .5) * 2, 1, -1) } });
@@ -450,20 +461,14 @@ const haptic = pattern => { if (save.haptics !== false) navigator.vibrate?.(patt
 function updateMute() { $('#sound-setting b').textContent = save.muted ? 'OFF' : 'ON'; $('#haptics-setting b').textContent = save.haptics === false ? 'OFF' : 'ON'; }
 
 function pointerPos(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * 2 - 1, y: -((e.clientY - r.top) / r.height * 2 - 1) }; }
-function lockAimTarget(point) {
+function setAimTarget(point) {
   const maxX = (levelData.tower.cols - 1) * .71 + .5, maxY = (levelData.tower.rows - 1) * .93 + .4;
   point.x = clamp(point.x, -maxX, maxX); point.y = clamp(point.y, .35, maxY); point.z = levelData.towerZ;
-  let nearest = null, nearestDistance = 2.7;
-  for (const block of blocks) {
-    if (!block.userData.alive) continue;
-    const distance = Math.hypot(block.position.x - point.x, block.position.y - point.y) + Math.abs(block.position.z - point.z) * .08;
-    if (distance < nearestDistance) { nearest = block; nearestDistance = distance; }
-  }
-  aimTarget.copy(nearest ? nearest.position : point); pointer.aimX = aimTarget.x / Math.max(1, maxX); pointer.aimY = aimTarget.y / Math.max(1, maxY); $('#aim-reticle').classList.toggle('locked', Boolean(nearest));
+  aimTarget.copy(point); pointer.aimX = aimTarget.x / Math.max(1, maxX); pointer.aimY = aimTarget.y / Math.max(1, maxY);
 }
 function updateAimFromPointer(p) {
   aimRaycaster.setFromCamera(new THREE.Vector2(p.x, p.y), camera); const worldPoint = new THREE.Vector3();
-  if (aimRaycaster.ray.intersectPlane(towerPlane, worldPoint)) lockAimTarget(worldPoint);
+  if (aimRaycaster.ray.intersectPlane(towerPlane, worldPoint)) setAimTarget(worldPoint);
   updateAimUI();
 }
 function updateAimUI() {
@@ -475,7 +480,7 @@ shell.addEventListener('pointerdown', e => {
   if (!['running','aiming'].includes(state) || e.target.closest?.('button')) return;
   e.preventDefault(); shell.setPointerCapture?.(e.pointerId); const p = pointerPos(e);
   pointer = { ...pointer, down:true, id:e.pointerId, moved:false, x:p.x, y:p.y, startX:p.x, startY:p.y };
-  if (state === 'aiming') updateAimFromPointer(p);
+  if (state === 'aiming') { $('#aim-reticle').classList.add('dragging'); updateAimFromPointer(p); }
   sound('pop');
 });
 shell.addEventListener('pointermove', e => {
@@ -487,9 +492,9 @@ shell.addEventListener('pointermove', e => {
 });
 shell.addEventListener('pointerup', e => {
   if (!pointer.down || (pointer.id !== null && e.pointerId !== pointer.id)) return;
-  e.preventDefault(); pointer.down = false; pointer.id = null;
+  e.preventDefault(); pointer.down = false; pointer.id = null; $('#aim-reticle').classList.remove('dragging');
 });
-shell.addEventListener('pointercancel', () => { pointer.down = false; pointer.id = null; });
+shell.addEventListener('pointercancel', () => { pointer.down = false; pointer.id = null; $('#aim-reticle').classList.remove('dragging'); });
 window.addEventListener('keydown', e => { if (state === 'running') { if (e.key === 'ArrowLeft' || e.key === 'a') targetX -= 1.2; if (e.key === 'ArrowRight' || e.key === 'd') targetX += 1.2; } if (state === 'aiming' && e.key === ' ') fireVolley(); });
 
 $('#play-btn').onclick = () => createLevel(save.level);
@@ -508,7 +513,7 @@ window.addEventListener('resize', resize); resize();
 
 function animate() {
   requestAnimationFrame(animate); const realDt = Math.min(.033, clock.getDelta()), t = clock.elapsedTime; if (slowMo > 0) slowMo = Math.max(0, slowMo - realDt); const dt = realDt * (slowMo > 0 ? .3 : 1);
-  if (state === 'running') updateRun(dt, t); else if (state === 'aiming') { updateBallInstances(t); camera.position.z = lerp(camera.position.z, levelData.finishZ - .5, dt * 2); camera.position.y = lerp(camera.position.y, 8.2, dt * 2); camera.position.x = lerp(camera.position.x, -aimTarget.x * .12, dt * 2); camera.lookAt(aimTarget.x * .12, 2.8, levelData.towerZ); updateAimUI(); } else if (state === 'firing') updateFinale(dt);
+  if (state === 'running') updateRun(dt, t); else if (state === 'aiming') { updateBallInstances(t); camera.position.z = lerp(camera.position.z, levelData.finishZ - .5, dt * 2); camera.position.y = lerp(camera.position.y, 8.2, dt * 2); camera.position.x = lerp(camera.position.x, 0, dt * 2); camera.lookAt(0, 2.8, levelData.towerZ); updateAimUI(); } else if (state === 'firing') updateFinale(dt);
   if (state === 'menu') { camera.position.x = Math.sin(t*.25)*3.5; camera.position.y = 9 + Math.sin(t*.4)*.4; camera.position.z = 17; camera.lookAt(0,0,-15); }
   for (const child of deco.children) if (child.userData.baseY !== undefined) { child.position.y = child.userData.baseY + Math.sin(t * .55 + child.userData.float) * .35; child.rotation.z += realDt * .08; }
   updateParticles(dt); if (shake > 0) { const s = shake * .18; camera.position.x += (Math.random()-.5)*s; camera.position.y += (Math.random()-.5)*s; shake = Math.max(0, shake-dt*1.7); }
