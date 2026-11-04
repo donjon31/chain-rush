@@ -5,12 +5,12 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const canvas = $('#game-canvas');
 const shell = $('#game-shell');
-const ui = Object.fromEntries(['menu','hud','pause','results','shop'].map(id => [id, $(`#${id}`)]));
+const ui = Object.fromEntries(['menu','hud','pause','results','shop','settings'].map(id => [id, $(`#${id}`)]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const MAX_RENDERED_BALLS = 620;
 
-const defaults = { level: 1, coins: 0, best: 0, selected: 'classic', owned: ['classic'], muted: false };
+const defaults = { level: 1, coins: 0, best: 0, selected: 'classic', owned: ['classic'], muted: false, haptics: true, tutorialSeen: false };
 let save;
 try { save = { ...defaults, ...JSON.parse(localStorage.getItem('chainRushSave') || '{}') }; } catch { save = { ...defaults }; }
 const persist = () => localStorage.setItem('chainRushSave', JSON.stringify(save));
@@ -116,7 +116,7 @@ function createEnvironment() {
     cloud.position.set((i % 2 ? 1 : -1) * (9 + (i * 7) % 14), 5 + (i * 3) % 12, 15 - i * 13); cloud.scale.set(1.8, .45, .7); deco.add(cloud);
   }
   const islandMat = glossy(0x896bea, .04, .68);
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < 42; i++) {
     const island = new THREE.Mesh(new THREE.ConeGeometry(2 + (i % 4), 8, 6), islandMat);
     island.position.set((i % 2 ? 1 : -1) * (12 + (i % 5) * 4), -5, 5 - i * 14); island.rotation.z = Math.PI; deco.add(island);
     if (i % 3 === 0) {
@@ -127,16 +127,17 @@ function createEnvironment() {
 }
 
 function createTrack() {
-  const track = roundedBox(10, .65, 242, .2, trackMat); track.position.set(0, -.55, -104); runGroup.add(track);
+  const trackDepth = levelData.trackLength + 25, trackCenter = (4 + levelData.finishZ) / 2;
+  const track = roundedBox(10, .65, trackDepth, .2, trackMat); track.position.set(0, -.55, trackCenter); runGroup.add(track);
   for (const x of [-5.15, 5.15]) {
-    const edge = roundedBox(.25, .55, 242, .1, edgeMat); edge.position.set(x, -.1, -104); runGroup.add(edge);
-    const glow = roundedBox(.06, .1, 242, .04, new THREE.MeshBasicMaterial({ color: 0x8f74ff })); glow.position.set(x > 0 ? 5.02 : -5.02, .18, -104); runGroup.add(glow);
+    const edge = roundedBox(.25, .55, trackDepth, .1, edgeMat); edge.position.set(x, -.1, trackCenter); runGroup.add(edge);
+    const glow = roundedBox(.06, .1, trackDepth, .04, new THREE.MeshBasicMaterial({ color: 0x8f74ff })); glow.position.set(x > 0 ? 5.02 : -5.02, .18, trackCenter); runGroup.add(glow);
   }
-  for (let z = 8; z > -215; z -= 12) {
+  for (let z = 8; z > levelData.finishZ - 2; z -= 12) {
     const stripe = roundedBox(8.8, .04, .16, 0, new THREE.MeshBasicMaterial({ color: 0xded7ff, transparent: true, opacity: .7 })); stripe.position.set(0, -.21, z); runGroup.add(stripe);
   }
-  const finish = roundedBox(10, .12, 4, 0, new THREE.MeshBasicMaterial({ color: 0xffffff })); finish.position.set(0, -.16, -213); runGroup.add(finish);
-  for (let x = -4.5; x <= 4.5; x += 1) for (let z = -211.5; z >= -214.5; z -= 1) { const sq = roundedBox(.96, .13, .96, 0, new THREE.MeshBasicMaterial({ color: ((x + z) | 0) % 2 ? 0x3e276f : 0xffffff })); sq.position.set(x, -.08, z); runGroup.add(sq); }
+  const finish = roundedBox(10, .12, 4, 0, new THREE.MeshBasicMaterial({ color: 0xffffff })); finish.position.set(0, -.16, levelData.finishZ + 1); runGroup.add(finish);
+  for (let x = -4.5; x <= 4.5; x += 1) for (let z = levelData.finishZ + 2.5; z >= levelData.finishZ - .5; z -= 1) { const sq = roundedBox(.96, .13, .96, 0, new THREE.MeshBasicMaterial({ color: ((x + Math.round(z)) | 0) % 2 ? 0x3e276f : 0xffffff })); sq.position.set(x, -.08, z); runGroup.add(sq); }
 }
 
 function createGate(pair) {
@@ -156,25 +157,53 @@ function createGate(pair) {
 
 function createObstacle(data, i) {
   const g = new THREE.Group(); g.position.set(0, 0, data.z); g.userData = { ...data, hit: false, index: i };
-  if (data.type === 'spinner') { const bar = roundedBox(7.6, .45, .58, .2, obstacleMat); bar.position.y = .25; g.add(bar); }
-  if (data.type === 'block') { const block = roundedBox(2.4, 2.1, 1.1, .2, obstacleMat); block.position.set(data.x, .65, 0); g.add(block); }
-  if (data.type === 'zone') { const zone = roundedBox(3.1, .06, 4.5, .2, new THREE.MeshStandardMaterial({ color: 0xff214d, emissive: 0xa8001f, emissiveIntensity: .5, transparent: true, opacity: .72 })); zone.position.set(data.x, -.16, 0); g.add(zone); }
-  if (data.type === 'gap') { for (const x of [-3.55, 3.55]) { const block = roundedBox(2.7, 1.8, 1.1, .2, obstacleMat); block.position.set(x, .52, 0); g.add(block); } }
+  if (data.type === 'movingWall') {
+    const wall = roundedBox(2.65, 2.25, 1.05, .18, obstacleMat); wall.position.set(data.x, .68, 0); g.add(wall); g.userData.wall = wall;
+    const arrows = makeText('↔', '#ffffff', 90); arrows.position.set(data.x, 2.25, .62); arrows.scale.set(2.4, 1.15, 1); g.add(arrows); g.userData.arrows = arrows;
+  }
+  if (data.type === 'hammer') {
+    const pivot = new THREE.Group(); const arm = roundedBox(6.7, .34, .5, .16, glossy(0xff4b78, .22, .2)); arm.position.y = .34; pivot.add(arm);
+    for (const x of [-3.25, 3.25]) { const head = roundedBox(1.15, 1.15, 1.05, .2, glossy(0xffc23d, .2, .25)); head.position.set(x, .36, 0); pivot.add(head); }
+    g.add(pivot); g.userData.pivot = pivot;
+  }
+  if (data.type === 'laser') {
+    const laserMat = new THREE.MeshStandardMaterial({ color: 0xff315e, emissive: 0xff164c, emissiveIntensity: 2.2, transparent: true, opacity: .88 });
+    const beam = roundedBox(3.7, .18, .48, .08, laserMat); beam.position.set(data.x, .48, 0); g.add(beam); g.userData.beam = beam;
+    for (const x of [data.x - 1.95, data.x + 1.95]) { const post = roundedBox(.32, 2.1, .52, .12, glossy(0x46204f, .4, .24)); post.position.set(x, .7, 0); g.add(post); }
+    const warning = makeText('LASER', '#ffef57', 54); warning.position.set(data.x, 2.05, .2); warning.scale.set(2.6, 1.05, 1); g.add(warning); g.userData.warning = warning;
+  }
+  if (data.type === 'crusher') {
+    const frame = roundedBox(3.1, .35, 1.25, .12, glossy(0x43266f, .32, .22)); frame.position.set(data.x, 4.2, 0); g.add(frame);
+    const plate = roundedBox(2.75, 1.15, 1.18, .16, glossy(0xff6c42, .18, .22)); plate.position.set(data.x, 2.8, 0); g.add(plate); g.userData.plate = plate;
+    const down = makeText('▼', '#fff25c', 82); down.position.set(data.x, 4.85, .3); down.scale.set(2, 1, 1); g.add(down);
+  }
+  if (data.type === 'narrow') {
+    const opening = clamp(data.x, -1.75, 1.75), gap = 3.4, leftEdge = opening - gap / 2, rightEdge = opening + gap / 2; g.userData.walls = [];
+    const widths = [leftEdge + 5, 5 - rightEdge], centers = [(-5 + leftEdge) / 2, (rightEdge + 5) / 2];
+    widths.forEach((width, index) => { if (width <= .15) return; const wall = roundedBox(width, 1.65, 1.3, .14, glossy(0x8f52ff, .12, .22)); wall.position.set(centers[index], .45, 0); wall.userData.halfWidth = width / 2; g.add(wall); g.userData.walls.push(wall); });
+    const marker = makeText('NARROW', '#ffffff', 50); marker.position.set(opening, 2.05, .35); marker.scale.set(2.7, 1, 1); g.add(marker);
+  }
+  if (data.type === 'risk') {
+    const laneX = clamp(data.x, -2, 2); g.userData.laneX = laneX; g.userData.bonusClaimed = false; g.userData.walls = [];
+    for (const x of [laneX - 1.35, laneX + 1.35]) { const rail = roundedBox(.48, 1.65, 3.8, .14, glossy(0xff3d78, .16, .2)); rail.position.set(x, .45, 0); rail.userData.halfWidth = .5; g.add(rail); g.userData.walls.push(rail); }
+    const pad = roundedBox(2.2, .08, 3.4, .15, new THREE.MeshStandardMaterial({ color: 0x2df0b3, emissive: 0x0ca778, emissiveIntensity: .9, transparent: true, opacity: .8 })); pad.position.set(laneX, -.15, 0); g.add(pad); g.userData.pad = pad;
+    const reward = makeText(`+${data.bonus}`, '#fff35c', 78); reward.position.set(laneX, 1.65, .3); reward.scale.set(2.6, 1.15, 1); g.add(reward);
+  }
   runGroup.add(g); obstacleObjects.push(g);
 }
 
 function createTower() {
   towerGroup = new THREE.Group(); world.add(towerGroup); blocks = [];
-  const arena = new THREE.Mesh(new THREE.CylinderGeometry(11, 12, 1.2, 48), glossy(0xeeeaff, .08, .3)); arena.position.set(0, -.8, -240); arena.receiveShadow = true; towerGroup.add(arena);
+  const arena = new THREE.Mesh(new THREE.CylinderGeometry(11, 12, 1.2, 48), glossy(0xeeeaff, .08, .3)); arena.position.set(0, -.8, levelData.towerZ); arena.receiveShadow = true; towerGroup.add(arena);
   const { rows, cols, layers } = levelData.tower;
   const palette = [0xff5aa7, 0x734dff, 0x23d7ed, 0xffd54a];
   for (let layer = 0; layer < layers; layer++) for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
     if ((x + y + layer + levelData.level) % 11 === 0 && y > rows - 3) continue;
     const w = 1.35, h = .88, d = 1.35; const mesh = roundedBox(w, h, d, .08, glossy(palette[(x + y + layer) % palette.length], .08, .23));
-    mesh.position.set((x - (cols - 1) / 2) * 1.42 + (y % 2) * .12, y * .93, -240 + (layer - (layers - 1) / 2) * 1.5);
+    mesh.position.set((x - (cols - 1) / 2) * 1.42 + (y % 2) * .12, y * .93, levelData.towerZ + (layer - (layers - 1) / 2) * 1.5);
     mesh.userData = { alive: true, vel: new THREE.Vector3(), baseY: mesh.position.y, delay: 0, unsupported: 0, id: blocks.length }; mesh.castShadow = true; towerGroup.add(mesh); blocks.push(mesh);
   }
-  const crown = makeText('CRUSH ME', '#ffe24c', 56); crown.position.set(0, rows * .95 + .7, -240); towerGroup.add(crown);
+  const crown = makeText('CRUSH ME', '#ffe24c', 56); crown.position.set(0, rows * .95 + .7, levelData.towerZ); towerGroup.add(crown);
 }
 
 function createLevel(level, replay = false) {
@@ -183,6 +212,7 @@ function createLevel(level, replay = false) {
   createTrack(); levelData.gates.forEach(createGate); levelData.obstacles.forEach(createObstacle); createTower();
   runGroup.add(ballMesh); cosmeticMaterial(); updateBallInstances(0); setState('running'); updateHud();
   $('#destroy-percent').textContent = '0%'; $('#destroy-fill').style.width = '0%'; camera.position.set(0, 8.7, 14); camera.lookAt(0, 0, -8); track('level_start', { level, replay });
+  if (!save.tutorialSeen) { save.tutorialSeen = true; persist(); setTimeout(() => { if (state === 'running') showToast('SWIPE TO STEER', true); }, 500); }
 }
 
 function makeFormation(count) {
@@ -237,7 +267,7 @@ function modifyBalls(mod, worldPos) {
 
 function obstacleHit(ob, impactWorldX) {
   if (ob.userData.hit) return; ob.userData.hit = true;
-  const requested = Math.max(2, Math.floor(ballCount * (.12 + levelData.level * .006))), loss = Math.min(requested, ballCount - 1);
+  const lossRatio = .12 + Math.min(.16, levelData.level * .004), requested = Math.max(2, Math.floor(ballCount * lossRatio)), loss = Math.min(requested, ballCount - 1);
   const impact = { x: impactWorldX - groupX, z: -.72 };
   const visualLoss = Math.min(ballMembers.length - 1, Math.max(1, Math.round(loss / ballCount * ballMembers.length)));
   const removedSet = new Set(impactRemovalIndices(ballMembers, impact, visualLoss));
@@ -251,7 +281,7 @@ function obstacleHit(ob, impactWorldX) {
 }
 
 function updateRun(dt, t) {
-  const speed = 10.3 + Math.min(4, levelData.level * .3); runZ -= speed * dt; groupX = lerp(groupX, targetX, 1 - Math.exp(-dt * 12)); groupX = clamp(groupX, -4.1, 4.1); updateBallInstances(t);
+  const speed = levelData.speed; runZ -= speed * dt; groupX = lerp(groupX, targetX, 1 - Math.exp(-dt * 12)); groupX = clamp(groupX, -4.1, 4.1); updateBallInstances(t);
   for (const g of gateObjects) {
     const glow = 1 + Math.sin(t * 4 + g.position.z) * .035; if (!g.userData.triggered) g.scale.set(glow, 1 + (glow - 1) * .5, glow);
     if (g.userData.pulse > 0) { g.userData.pulse = Math.max(0, g.userData.pulse - dt * 3.5); const kick = 1 + Math.sin(g.userData.pulse * Math.PI) * .12; g.scale.set(kick, kick, kick); }
@@ -260,32 +290,37 @@ function updateRun(dt, t) {
     if (runZ < g.position.z - 3.2) g.visible = false;
   }
   for (const ob of obstacleObjects) {
-    const d = ob.userData; if (d.type === 'spinner') ob.rotation.y += dt * d.speed * 2.5;
-    if (d.type === 'block') ob.children[0].position.x = d.x + Math.sin(t * d.speed) * 1.5;
-    if (Math.abs(runZ - ob.position.z) < 1.3) {
+    const d = ob.userData;
+    if (d.type === 'movingWall') { const x = d.x + Math.sin(t * d.speed + d.phase) * 2.15; d.wall.position.x = x; d.arrows.position.x = x; }
+    if (d.type === 'hammer') d.pivot.rotation.y += dt * d.speed * 2.7;
+    if (d.type === 'laser') { d.active = Math.sin(t * Math.PI * 2 / d.period + d.phase) > -.08; d.beam.visible = d.active; d.warning.visible = d.active; d.beam.material.opacity = d.active ? .9 : .12; }
+    if (d.type === 'crusher') d.plate.position.y = .42 + (Math.sin(t * d.speed * 2.2 + d.phase) + 1) * 1.55;
+    if (d.type === 'risk') d.pad.material.emissiveIntensity = .75 + Math.sin(t * 5 + d.phase) * .25;
+    if (Math.abs(runZ - ob.position.z) < 1.45) {
       const touchesX = (x, radius) => ballMembers.some(member => Math.abs(groupX + member.x - x) < radius);
-      const spinnerReach = Math.abs(Math.cos(ob.rotation.y)) * 3.8;
-      const spinnerX = clamp(groupX, -spinnerReach, spinnerReach);
-      if (d.type === 'spinner' && spinnerReach > .45 && touchesX(spinnerX, .48)) obstacleHit(ob, spinnerX);
-      if (d.type === 'block' && touchesX(ob.children[0].position.x, 1.45)) obstacleHit(ob, ob.children[0].position.x);
-      if (d.type === 'zone' && touchesX(d.x, 1.75)) obstacleHit(ob, d.x);
-      if (d.type === 'gap') {
-        const leftHit = touchesX(-3.55, 1.55), rightHit = touchesX(3.55, 1.55);
-        if (leftHit || rightHit) obstacleHit(ob, leftHit ? -3.55 : 3.55);
+      if (d.type === 'movingWall' && touchesX(d.wall.position.x, 1.55)) obstacleHit(ob, d.wall.position.x);
+      if (d.type === 'hammer') { const hammerX = Math.cos(d.pivot.rotation.y) * 3.25, leftHit = touchesX(-hammerX, .72), rightHit = touchesX(hammerX, .72); if (leftHit || rightHit) obstacleHit(ob, leftHit ? -hammerX : hammerX); }
+      if (d.type === 'laser' && d.active && touchesX(d.x, 2.05)) obstacleHit(ob, d.x);
+      if (d.type === 'crusher' && d.plate.position.y < 1.35 && touchesX(d.x, 1.55)) obstacleHit(ob, d.x);
+      if (d.type === 'narrow') { const wall = d.walls.find(item => touchesX(item.position.x, item.userData.halfWidth + .2)); if (wall) obstacleHit(ob, wall.position.x); }
+      if (d.type === 'risk') {
+        if (!d.bonusClaimed && Math.abs(groupX - d.laneX) < .95) { d.bonusClaimed = true; growBallFormation(ballCount + d.bonus); showToast(`RISK +${d.bonus}`, true); burst(new THREE.Vector3(d.laneX, .25, ob.position.z), 0x35f2bd, 18); sound('multiply'); haptic([25,18,35]); updateHud(); }
+        else if (!d.bonusClaimed) { const wall = d.walls.reduce((closest, item) => Math.abs(item.position.x - groupX) < Math.abs(closest.position.x - groupX) ? item : closest); obstacleHit(ob, wall.position.x); }
       }
     }
+    if (runZ < ob.position.z - 6) ob.visible = false;
   }
-  const progress = clamp((-runZ + 4) / 217, 0, 1); setProgress(progress);
-  if (progress > .82 && !finaleWarned) { finaleWarned = true; showCallout('FINAL TOWER', `${ballCount} BALLS READY`, 'anticipation'); sound('ready'); }
+  const progress = clamp((4 - runZ) / levelData.trackLength, 0, 1); setProgress(progress);
+  if (progress > .86 && !finaleWarned) { finaleWarned = true; sound('ready'); haptic(18); }
   runnerRim.position.set(groupX - 3, 4.5, runZ + 2);
   const speedBob = Math.sin(t * 4.2) * .045; camera.position.x = lerp(camera.position.x, groupX * .34, 1 - Math.exp(-dt * 3.5)); camera.position.z = runZ + 14 + cameraImpulse; camera.position.y = 8.65 + speedBob; camera.lookAt(groupX * .28, .15, runZ - 8.5);
   cameraImpulse = lerp(cameraImpulse, 0, 1 - Math.exp(-dt * 7)); growthWave = Math.max(0, growthWave - dt);
-  if (runZ <= -214) beginAim();
+  if (runZ <= levelData.finishZ) beginAim();
 }
 
 function beginAim() {
-  state = nextState(state, 'FINISH_RUN'); shell.dataset.state = 'aiming'; runZ = -226; targetX = groupX = 0; pointer = { ...pointer, down: false, id: null, moved: false, aimX: 0, aimY: .2 };
-  lockAimTarget(new THREE.Vector3(0, Math.max(1.2, (levelData.tower.rows - 1) * .465), -240)); updateAimUI(); updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.remove('active'); setProgress(1);
+  state = nextState(state, 'FINISH_RUN'); shell.dataset.state = 'aiming'; runZ = levelData.finishZ - 12; targetX = groupX = 0; pointer = { ...pointer, down: false, id: null, moved: false, aimX: 0, aimY: .2 }; towerPlane.constant = -levelData.towerZ;
+  lockAimTarget(new THREE.Vector3(0, Math.max(1.2, (levelData.tower.rows - 1) * .465), levelData.towerZ)); updateAimUI(); updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.remove('active'); setProgress(1);
   showCallout('AIM & SMASH!', `${ballCount} BALL VOLLEY`, 'anticipation'); sound('ready'); haptic([25, 30, 25]); track('finale_ready', { balls: ballCount });
 }
 
@@ -294,7 +329,7 @@ function fireVolley() {
   const visualCount = Math.min(220, ballCount, Math.max(45, Math.ceil(Math.sqrt(ballCount) * 10)));
   for (let i = 0; i < visualCount; i++) {
     const mesh = new THREE.Mesh(ballGeo, ballMesh.material); mesh.scale.setScalar(.82 + (i % 5) * .035); mesh.castShadow = true;
-    mesh.position.set((Math.random() - .5) * 2.2, .3 + Math.random() * .8, -225 + (Math.random() - .5) * 1.6);
+    mesh.position.set((Math.random() - .5) * 2.2, .3 + Math.random() * .8, runZ + 1 + (Math.random() - .5) * 1.6);
     const flightTime = .62 + Math.random() * .13, target = aimTarget.clone(); target.x += (Math.random() - .5) * .5; target.y += (Math.random() - .5) * .42; target.z += (Math.random() - .5) * .34;
     mesh.userData.vel = target.sub(mesh.position).divideScalar(flightTime); mesh.userData.vel.y += 3.4 * flightTime; mesh.userData.life = 0; mesh.userData.damage = Math.max(1, ballCount / visualCount); world.add(mesh); shots.push(mesh);
   }
@@ -327,11 +362,11 @@ function hitBlock(block, shot) {
 }
 
 function updateFinale(dt) {
-  finishTimer += dt; camera.position.x = lerp(camera.position.x, Math.sin(finishTimer * .6) * .45, 1 - Math.exp(-dt * 2)); camera.position.y = lerp(camera.position.y, 7.6 - Math.min(1, targetDestroy / 100), 1 - Math.exp(-dt * 2)); camera.position.z = lerp(camera.position.z, -215.3 + cameraImpulse, 1 - Math.exp(-dt * 2)); camera.lookAt(0, 2.8, -240); cameraImpulse = lerp(cameraImpulse, 0, 1 - Math.exp(-dt * 6));
+  finishTimer += dt; camera.position.x = lerp(camera.position.x, Math.sin(finishTimer * .6) * .45, 1 - Math.exp(-dt * 2)); camera.position.y = lerp(camera.position.y, 7.6 - Math.min(1, targetDestroy / 100), 1 - Math.exp(-dt * 2)); camera.position.z = lerp(camera.position.z, levelData.finishZ - 1.3 + cameraImpulse, 1 - Math.exp(-dt * 2)); camera.lookAt(0, 2.8, levelData.towerZ); cameraImpulse = lerp(cameraImpulse, 0, 1 - Math.exp(-dt * 6));
   for (let i = shots.length - 1; i >= 0; i--) {
     const s = shots[i]; s.userData.life += dt; s.userData.vel.y -= 6.8 * dt; s.position.addScaledVector(s.userData.vel, dt); s.rotation.x += dt * 9;
     let hit = null;
-    if (s.position.z < -235.2 && s.position.z > -244.5) {
+    if (s.position.z < levelData.towerZ + 4.8 && s.position.z > levelData.towerZ - 4.5) {
       let nearestDistance = 1.42;
       for (const b of blocks) {
         if (!b.userData.alive) continue;
@@ -411,13 +446,13 @@ function renderShop() {
 
 let audioCtx;
 function sound(type) { if (save.muted) return; audioCtx ||= new (window.AudioContext || window.webkitAudioContext)(); const t = audioCtx.currentTime; const osc = audioCtx.createOscillator(), gain = audioCtx.createGain(); const types = { gate:[520,920,.14,'sine'],multiply:[290,1180,.28,'triangle'],hit:[135,62,.2,'sawtooth'],ready:[320,590,.24,'triangle'],launch:[170,540,.34,'sawtooth'],pop:[235,145,.085,'square'],crush:[105,48,.2,'sawtooth'],coin:[820,1320,.13,'sine'],victory:[440,940,.58,'triangle'] }; const p = types[type] || types.pop; osc.type = p[3]; osc.detune.value = (Math.random() - .5) * (type === 'pop' ? 90 : 35); osc.frequency.setValueAtTime(p[0],t); osc.frequency.exponentialRampToValueAtTime(p[1],t+p[2]); gain.gain.setValueAtTime(.0001,t); gain.gain.exponentialRampToValueAtTime(type==='hit'||type==='crush'?.12:.072,t+.01); gain.gain.exponentialRampToValueAtTime(.0001,t+p[2]); osc.connect(gain).connect(audioCtx.destination); osc.start(t); osc.stop(t+p[2]+.02); }
-const haptic = pattern => navigator.vibrate?.(pattern);
-function updateMute() { $('#mute-menu').textContent = save.muted ? '×' : '♪'; }
+const haptic = pattern => { if (save.haptics !== false) navigator.vibrate?.(pattern); };
+function updateMute() { $('#sound-setting b').textContent = save.muted ? 'OFF' : 'ON'; $('#haptics-setting b').textContent = save.haptics === false ? 'OFF' : 'ON'; }
 
 function pointerPos(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * 2 - 1, y: -((e.clientY - r.top) / r.height * 2 - 1) }; }
 function lockAimTarget(point) {
   const maxX = (levelData.tower.cols - 1) * .71 + .5, maxY = (levelData.tower.rows - 1) * .93 + .4;
-  point.x = clamp(point.x, -maxX, maxX); point.y = clamp(point.y, .35, maxY); point.z = -240;
+  point.x = clamp(point.x, -maxX, maxX); point.y = clamp(point.y, .35, maxY); point.z = levelData.towerZ;
   let nearest = null, nearestDistance = 2.7;
   for (const block of blocks) {
     if (!block.userData.alive) continue;
@@ -462,8 +497,10 @@ $('#launch-btn').onclick = () => { if (state === 'aiming') fireVolley(); };
 $('#pause-btn').onclick = () => { if (state === 'running') { state = nextState(state,'PAUSE'); setState('pause'); } };
 $('#resume-btn').onclick = () => { state = nextState(state,'RESUME'); setState('running'); };
 $('#shop-btn').onclick = () => setState('shop'); $('#close-shop').onclick = () => setState('menu');
+$('#settings-btn').onclick = () => setState('settings'); $('#close-settings').onclick = () => setState('menu');
+$('#sound-setting').onclick = () => { save.muted = !save.muted; persist(); updateMute(); if (!save.muted) sound('coin'); };
+$('#haptics-setting').onclick = () => { save.haptics = save.haptics === false; persist(); updateMute(); haptic(28); };
 $('#next-btn').onclick = () => createLevel(levelData.level + 1); $('#replay-btn').onclick = () => createLevel(levelData.level, true); $$('[data-home]').forEach(b => b.onclick = () => setState('menu'));
-$('#mute-menu').onclick = () => { save.muted = !save.muted; persist(); updateMute(); if (!save.muted) sound('coin'); };
 $('#share-btn').onclick = async () => { const pct = Math.round(destroyed / blocks.length * 100); const text = `I destroyed ${pct}% of the tower on level ${levelData.level} in CHAIN RUSH. Can you beat me?`; try { if (navigator.share) await navigator.share({ title:'CHAIN RUSH', text, url:location.href }); else { await navigator.clipboard.writeText(`${text} ${location.href}`); showToast('COPIED!', true); } } catch {} };
 
 function resize() { const w = shell.clientWidth, h = shell.clientHeight; renderer.setSize(w,h,false); camera.aspect = w/h; camera.fov = h/w > 1.9 ? 58 : 54; camera.updateProjectionMatrix(); }
@@ -471,7 +508,7 @@ window.addEventListener('resize', resize); resize();
 
 function animate() {
   requestAnimationFrame(animate); const realDt = Math.min(.033, clock.getDelta()), t = clock.elapsedTime; if (slowMo > 0) slowMo = Math.max(0, slowMo - realDt); const dt = realDt * (slowMo > 0 ? .3 : 1);
-  if (state === 'running') updateRun(dt, t); else if (state === 'aiming') { updateBallInstances(t); camera.position.z = lerp(camera.position.z, -214.5, dt * 2); camera.position.y = lerp(camera.position.y, 8.2, dt * 2); camera.position.x = lerp(camera.position.x, -aimTarget.x * .12, dt * 2); camera.lookAt(aimTarget.x * .12, 2.8, -240); updateAimUI(); } else if (state === 'firing') updateFinale(dt);
+  if (state === 'running') updateRun(dt, t); else if (state === 'aiming') { updateBallInstances(t); camera.position.z = lerp(camera.position.z, levelData.finishZ - .5, dt * 2); camera.position.y = lerp(camera.position.y, 8.2, dt * 2); camera.position.x = lerp(camera.position.x, -aimTarget.x * .12, dt * 2); camera.lookAt(aimTarget.x * .12, 2.8, levelData.towerZ); updateAimUI(); } else if (state === 'firing') updateFinale(dt);
   if (state === 'menu') { camera.position.x = Math.sin(t*.25)*3.5; camera.position.y = 9 + Math.sin(t*.4)*.4; camera.position.z = 17; camera.lookAt(0,0,-15); }
   for (const child of deco.children) if (child.userData.baseY !== undefined) { child.position.y = child.userData.baseY + Math.sin(t * .55 + child.userData.float) * .35; child.rotation.z += realDt * .08; }
   updateParticles(dt); if (shake > 0) { const s = shake * .18; camera.position.x += (Math.random()-.5)*s; camera.position.y += (Math.random()-.5)*s; shake = Math.max(0, shake-dt*1.7); }

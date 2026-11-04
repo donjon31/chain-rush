@@ -12,6 +12,7 @@
   <meta name="description" content="CHAIN RUSH — grow your ball army, pick the best gates, and smash the tower.">
   <title>CHAIN RUSH</title>
   <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -26,18 +27,18 @@
     <div id="confetti-layer" aria-hidden="true"></div>
 
     <section id="menu" class="screen active">
-      <div class="menu-top"><button id="mute-menu" class="icon-btn" aria-label="Toggle sound">♪</button></div>
-      <div class="logo" aria-label="CHAIN RUSH"><span>CHAIN</span><strong>RUSH</strong><i></i></div>
-      <p class="tagline">GROW. AIM. <b>DESTROY.</b></p>
-      <div class="menu-card glass">
-        <div class="level-pill">LEVEL <b id="menu-level">1</b></div>
-        <button id="play-btn" class="primary-btn"><span>PLAY</span><small>DRAG TO STEER</small></button>
-        <div class="menu-row">
-          <button id="shop-btn" class="secondary-btn"><span>◉</span> COSMETICS</button>
-          <div class="coin-chip">● <b id="menu-coins">0</b></div>
+      <button id="settings-btn" class="icon-btn menu-settings" aria-label="Settings">⚙</button>
+      <div class="menu-center">
+        <div class="logo menu-logo" aria-label="CHAIN RUSH"><span>CHAIN</span><strong>RUSH</strong><i></i></div>
+        <div class="menu-meta"><span class="level-chip">LV <b id="menu-level">1</b></span><span class="coin-chip menu-coins">● <b id="menu-coins">0</b></span></div>
+        <button id="play-btn" class="primary-btn menu-play"><span>PLAY</span></button>
+        <div class="mode-grid">
+          <button class="mode-btn" disabled aria-disabled="true"><span>⚑</span><b>RACE</b><small>SOON</small></button>
+          <button id="shop-btn" class="mode-btn"><span>◉</span><b>SHOP</b></button>
+          <button class="mode-btn" disabled aria-disabled="true"><span>★</span><b>LEADERBOARD</b><small>SOON</small></button>
         </div>
       </div>
-      <p class="best-label">BEST <b id="menu-best">0</b></p>
+      <p class="best-label">PERSONAL BEST <b id="menu-best">0</b></p>
     </section>
 
     <section id="hud" class="screen game-ui" aria-live="polite">
@@ -84,6 +85,14 @@
         <div class="panel-head"><div><p class="eyebrow">YOUR STYLE</p><h2>BALL LAB</h2></div><button id="close-shop" class="icon-btn">×</button></div>
         <div class="shop-balance">● <b id="shop-coins">0</b> COINS</div>
         <div id="cosmetic-list" class="cosmetic-list"></div>
+      </div>
+    </section>
+
+    <section id="settings" class="screen overlay-screen">
+      <div class="panel glass settings-panel">
+        <div class="panel-head"><div><p class="eyebrow">GAME OPTIONS</p><h2>SETTINGS</h2></div><button id="close-settings" class="icon-btn" aria-label="Close settings">×</button></div>
+        <button id="sound-setting" class="setting-row"><span>SOUND</span><b>ON</b></button>
+        <button id="haptics-setting" class="setting-row"><span>HAPTICS</span><b>ON</b></button>
       </div>
     </section>
 

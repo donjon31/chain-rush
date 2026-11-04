@@ -49,26 +49,62 @@ export function nextState(state, event) {
   return map[state]?.[event] || state;
 }
 
+export function levelTuning(index) {
+  const level = Math.max(1, Math.floor(index));
+  if (level <= 5) return { speed: 8.8 + (level - 1) * .18, trackLength: 220 + (level - 1) * 8, gateCount: 5, obstacleCount: 4 + Math.floor((level - 1) / 2) };
+  if (level <= 15) return { speed: 9.8 + (level - 6) * .12, trackLength: 300 + (level - 6) * 8, gateCount: 6, obstacleCount: 6 + Math.floor((level - 6) / 4) };
+  if (level <= 30) return { speed: 10.9 + (level - 16) * .08, trackLength: 385 + (level - 16) * 7, gateCount: 7, obstacleCount: 8 + Math.floor((level - 16) / 6) };
+  if (level <= 50) return { speed: 12.1 + (level - 31) * .045, trackLength: 490 + (level - 31) * 3, gateCount: 8, obstacleCount: 10 };
+  return { speed: Math.min(13.8, 13 + (level - 51) * .025), trackLength: 550 + Math.min(50, (level - 51) * 2), gateCount: 8 + (level % 3 === 0 ? 1 : 0), obstacleCount: 11 };
+}
+
+function deterministic(level, index, salt = 0) {
+  const value = Math.sin(level * 91.17 + index * 47.63 + salt * 13.37) * 43758.5453;
+  return value - Math.floor(value);
+}
+
 export function makeLevel(index) {
   const level = Math.max(1, Math.floor(index));
+  const tuning = levelTuning(level);
   const gateSets = [
     [['+', 25], ['x', 2]], [['+', 50], ['-', 10]], [['x', 3], ['+', 25]],
     [['/', 2], ['+', 50]], [['x', 2], ['+', 10]], [['x', 5], ['-', 10]],
-    [['+', 50], ['x', 3]], [['+', 25], ['/', 2]]
+    [['+', 50], ['x', 3]], [['+', 25], ['/', 2]], [['+', 10], ['x', 2]],
+    [['-', 10], ['+', 50]], [['x', 3], ['/', 2]], [['+', 25], ['x', 5]]
   ];
-  const gates = [36, 68, 101, 134, 168].map((z, i) => {
+  const gates = Array.from({ length: tuning.gateCount }, (_, i) => {
+    const distance = 34 + i * (tuning.trackLength - 72) / Math.max(1, tuning.gateCount - 1);
     const pair = gateSets[(level * 3 + i * 5) % gateSets.length];
-    return { z: -z, left: { op: pair[0][0], value: pair[0][1] }, right: { op: pair[1][0], value: pair[1][1] } };
+    const flip = deterministic(level, i, 1) > .5;
+    const left = flip ? pair[1] : pair[0], right = flip ? pair[0] : pair[1];
+    return { z: 4 - distance, left: { op: left[0], value: left[1] }, right: { op: right[0], value: right[1] } };
   });
-  const obstacles = [53, 86, 118, 151, 184].map((z, i) => ({
-    z: -z - ((level + i) % 3) * 2,
-    type: ['spinner', 'block', 'zone', 'gap'][(level + i) % 4],
-    x: (((level * 13 + i * 7) % 5) - 2) * 1.55,
-    speed: 0.65 + level * 0.045 + i * 0.06
-  }));
+  const obstacleTypes = ['movingWall'];
+  if (level >= 2) obstacleTypes.push('narrow');
+  if (level >= 4) obstacleTypes.push('hammer');
+  if (level >= 6) obstacleTypes.push('laser');
+  if (level >= 8) obstacleTypes.push('crusher');
+  if (level >= 10) obstacleTypes.push('risk');
+  const obstacles = Array.from({ length: tuning.obstacleCount }, (_, i) => {
+    const distance = 55 + i * (tuning.trackLength - 105) / Math.max(1, tuning.obstacleCount - 1);
+    const type = obstacleTypes[(level + i) % obstacleTypes.length];
+    return {
+      z: 4 - distance,
+      type,
+      x: (deterministic(level, i, 2) * 2 - 1) * 2.45,
+      speed: .72 + Math.min(.9, level * .012) + deterministic(level, i, 3) * .28,
+      phase: deterministic(level, i, 4) * Math.PI * 2,
+      period: 1.7 + deterministic(level, i, 5) * 1.1,
+      bonus: Math.min(50, 12 + level * 2)
+    };
+  });
+  const finishZ = 4 - tuning.trackLength;
   return {
     level,
     startBalls: 12 + ((level - 1) % 5) * 3,
+    ...tuning,
+    finishZ,
+    towerZ: finishZ - 26,
     gates,
     obstacles,
     tower: { rows: 6 + Math.min(4, Math.floor(level / 2)), cols: 5 + (level % 3), layers: 2 + (level % 2) },

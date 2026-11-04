@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
-import { applyModifier, nextState, makeLevel, scoreRun, impactRemovalIndices } from '../dist/js/gameLogic.js';
+import { applyModifier, nextState, makeLevel, levelTuning, scoreRun, impactRemovalIndices } from '../dist/js/gameLogic.js';
 
 test('gate modifiers are whole, nonnegative, and capped', () => {
   assert.equal(applyModifier(12, { op: '+', value: 25 }), 37);
@@ -18,13 +18,36 @@ test('game states follow the playable loop', () => {
   assert.equal(nextState('firing', 'SETTLED'), 'results');
 });
 
-test('ten deterministic levels remain valid', () => {
-  for (let level = 1; level <= 10; level++) {
+test('sixty deterministic levels remain valid and fair', () => {
+  for (let level = 1; level <= 60; level++) {
     const data = makeLevel(level);
     assert.ok(data.startBalls > 0);
-    assert.equal(data.gates.length, 5);
-    assert.equal(data.obstacles.length, 5);
+    assert.ok(data.gates.length >= 5);
+    assert.ok(data.obstacles.length >= 4);
+    assert.ok(data.gates.every(gate => gate.z < 0 && gate.z > data.finishZ));
+    assert.ok(data.obstacles.every(obstacle => obstacle.z < 0 && obstacle.z > data.finishZ));
   }
+});
+
+test('difficulty grows in bounded tiers with sensible level durations', () => {
+  let previous = levelTuning(1);
+  for (let level = 2; level <= 100; level++) {
+    const tuning = levelTuning(level);
+    assert.ok(tuning.speed >= previous.speed);
+    assert.ok(tuning.speed <= 13.8);
+    assert.ok(tuning.trackLength >= previous.trackLength);
+    const seconds = tuning.trackLength / tuning.speed;
+    assert.ok(seconds >= 20 && seconds <= 50);
+    previous = tuning;
+  }
+});
+
+test('advanced obstacle types unlock progressively', () => {
+  assert.deepEqual([...new Set(makeLevel(1).obstacles.map(item => item.type))], ['movingWall']);
+  assert.ok(makeLevel(4).obstacles.some(item => item.type === 'hammer'));
+  assert.ok(makeLevel(6).obstacles.some(item => item.type === 'laser'));
+  assert.ok(makeLevel(8).obstacles.some(item => item.type === 'crusher'));
+  assert.ok(makeLevel(10).obstacles.some(item => item.type === 'risk'));
 });
 
 test('a strong gate route can exceed the old 420-ball ceiling on every tested level', () => {
