@@ -58,6 +58,8 @@ const deco = new THREE.Group(); scene.add(deco);
 let state = 'menu', levelData, runGroup, towerGroup, gateObjects = [], obstacleObjects = [], blocks = [], shots = [], particles = [], particlePool = [];
 let ballCount = 12, runZ = 0, targetX = 0, groupX = 0, fired = false, finishTimer = 0, destroyed = 0, combo = 0, maxCombo = 0, lastDestroyAt = 0, shake = 0, cameraImpulse = 0, levelStartBalls = 0, destructionLimit = Infinity;
 let targetDestroy = 0, displayedDestroy = 0, slowMo = 0, finaleWarned = false, growthWave = 0, perfectCelebrated = false;
+let levelStartedAt = 0, gameStarted = false, lastRunFailed = false;
+let installGuideEligible = false;
 let ballMembers = [];
 let pointer = { down: false, id: null, moved: false, x: 0, y: 0, startX: 0, startY: 0, aimX: 0, aimY: .2 };
 const aimTarget = new THREE.Vector3(0, 2.8, -240);
@@ -240,11 +242,12 @@ function createTower() {
 
 function createLevel(level, replay = false) {
   shots = []; shotMesh.count = 0; particles.forEach(particle => { if (particlePool.length < particleLimit) particlePool.push(particle); }); particles = []; particleBatches.forEach(batch => batch.mesh.count = 0); clearGroup(runGroup); clearGroup(towerGroup); runGroup = new THREE.Group(); world.add(runGroup); gateObjects = []; obstacleObjects = []; levelReady = true;
-  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = cameraImpulse = 0; targetDestroy = displayedDestroy = 0; destructionLimit = Infinity; slowMo = 0; finaleWarned = false; perfectCelebrated = false; $('#confetti-layer').replaceChildren();
+  levelData = makeLevel(level); levelStartBalls = levelData.startBalls; ballCount = levelStartBalls; resetBallFormation(ballCount); runZ = 4; groupX = targetX = 0; destroyed = combo = maxCombo = 0; fired = false; finishTimer = 0; shake = cameraImpulse = 0; targetDestroy = displayedDestroy = 0; destructionLimit = Infinity; slowMo = 0; finaleWarned = false; perfectCelebrated = false; lastRunFailed = false; levelStartedAt = performance.now(); $('#confetti-layer').replaceChildren();
   createTrack(); levelData.gates.forEach(createGate); levelData.obstacles.forEach(createObstacle); createTower();
   runGroup.add(ballMesh); cosmeticMaterial(); updateBallInstances(0); setState('running'); updateHud();
-  $('#destroy-percent').textContent = '0%'; $('#destroy-fill').style.width = '0%'; camera.position.set(0, 8.7, 14); camera.lookAt(0, 0, -8); track('level_start', { level, replay });
-  if (!save.tutorialSeen) { save.tutorialSeen = true; persist(); setTimeout(() => { if (state === 'running') showToast('SWIPE TO STEER', true); }, 500); }
+  $('#destroy-percent').textContent = '0%'; $('#destroy-fill').style.width = '0%'; camera.position.set(0, 8.7, 14); camera.lookAt(0, 0, -8); track('level_started', { level, replay });
+  const tutorial = $('#tutorial-hint'); tutorial?.classList.remove('show');
+  if (!save.tutorialSeen) setTimeout(() => { if (state === 'running' && !save.tutorialSeen) tutorial?.classList.add('show'); }, 450);
 }
 
 function makeFormation(count) {
@@ -257,12 +260,12 @@ function makeFormation(count) {
 }
 
 function resetBallFormation(count) {
-  ballCount = Math.max(1, Math.min(MAX_BALLS, Math.floor(count)));
+  ballCount = Math.max(0, Math.min(MAX_BALLS, Math.floor(count)));
   ballMembers = makeFormation(Math.min(MAX_RENDERED_BALLS, ballCount));
 }
 
 function growBallFormation(count) {
-  const next = Math.max(1, Math.min(MAX_BALLS, Math.floor(count))), visualNext = Math.min(MAX_RENDERED_BALLS, next), targets = makeFormation(visualNext), now = clock.elapsedTime, previous = ballMembers.length;
+  const next = Math.max(0, Math.min(MAX_BALLS, Math.floor(count))), visualNext = Math.min(MAX_RENDERED_BALLS, next), targets = makeFormation(visualNext), now = clock.elapsedTime, previous = ballMembers.length;
   if (ballMembers.length > visualNext) ballMembers.length = visualNext;
   for (let i = 0; i < visualNext; i++) {
     if (i < previous) {
@@ -296,11 +299,18 @@ function updateShotInstances() {
 
 function modifyBalls(mod, worldPos) {
   const before = ballCount, next = applyModifier(ballCount, mod), diff = next - before;
-  if (diff > 0) growBallFormation(next); else resetBallFormation(Math.max(1, next));
+  if (diff > 0) growBallFormation(next); else resetBallFormation(next);
   const multiplier = mod.op === 'x' && mod.value >= 3;
   showToast(multiplier ? `ARMY ×${mod.value}!` : `${diff >= 0 ? '+' : ''}${diff}`, diff >= 0); burst(worldPos, diff >= 0 ? 0x54ffe0 : 0xff3b6f, Math.min(lowPower ? 18 : 32, Math.abs(diff) + 9));
   sound(multiplier ? 'multiply' : diff >= 0 ? 'gate' : 'hit'); haptic(multiplier ? [25, 18, 42] : diff >= 0 ? 24 : [35, 30, 35]); cameraImpulse = multiplier ? .42 : .2; shake = Math.max(shake, multiplier ? .16 : .08); $('#ball-badge').classList.add('pop'); setTimeout(() => $('#ball-badge').classList.remove('pop'), 220); updateHud();
-  if (next <= 0) showToast('LAST CHANCE!', false);
+  if (next <= 0) { showToast('OUT OF BALLS!', false); setTimeout(() => { if (state === 'running') failLevel('gate'); }, 260); }
+}
+
+function failLevel(reason) {
+  lastRunFailed = true; state = 'results'; shell.dataset.state = 'results'; $('#tutorial-hint')?.classList.remove('show');
+  $('#result-title').textContent = 'TRY AGAIN!'; $('#result-destroy').textContent = '0%'; $('#result-balls').textContent = '0'; $('#result-coins').textContent = '0'; $('#result-score').textContent = '0'; $('#result-best').textContent = save.best.toLocaleString(); $('#result-ring').style.setProperty('--pct', 0);
+  $('#next-btn').innerHTML = 'TRY AGAIN <span>↻</span>'; setState('results'); sound('hit'); haptic([55, 35, 55]);
+  track('level_failed', { level:levelData.level, duration_seconds:Math.max(1, Math.round((performance.now() - levelStartedAt) / 1000)), reason });
 }
 
 function obstacleHit(ob, impactWorldX) {
@@ -357,7 +367,7 @@ function updateRun(dt, t) {
 }
 
 function beginAim() {
-  state = nextState(state, 'FINISH_RUN'); shell.dataset.state = 'aiming'; runZ = levelData.finishZ - 12; targetX = groupX = 0; pointer = { ...pointer, down: false, id: null, moved: false, aimX: 0, aimY: .2 }; towerPlane.constant = -levelData.towerZ;
+  state = nextState(state, 'FINISH_RUN'); shell.dataset.state = 'aiming'; runZ = levelData.finishZ - 12; targetX = groupX = 0; pointer = { ...pointer, down: false, id: null, moved: false, aimX: 0, aimY: .2 }; towerPlane.constant = -levelData.towerZ; $('#tutorial-hint')?.classList.remove('show');
   const maxY = (levelData.tower.rows - 1) * .93 + .4;
   setAimTarget(new THREE.Vector3(0, maxY * .28, levelData.towerZ)); updateAimUI(); updateBallInstances(0); $('#aim-ui').classList.add('active'); $('#destruction-ui').classList.remove('active'); setProgress(1);
   showCallout('AIM & SMASH!', `${ballCount} BALL VOLLEY`, 'anticipation'); sound('ready'); haptic([25, 30, 25]); track('finale_ready', { balls: ballCount });
@@ -442,10 +452,10 @@ function updateFinale(dt) {
 }
 
 function finishLevel() {
-  state = nextState(state, 'SETTLED'); const pct = Math.round(destroyed / blocks.length * 100); const score = scoreRun({ balls: ballCount, destroyed: pct, combo: maxCombo, level: levelData.level }); const coins = coinsFor({ destroyed: pct, score });
+  state = nextState(state, 'SETTLED'); const pct = Math.round(destroyed / blocks.length * 100); const score = scoreRun({ balls: ballCount, destroyed: pct, combo: maxCombo, level: levelData.level }); const coins = coinsFor({ destroyed: pct, score }); const isBest = score > save.best;
   save.coins += coins; save.best = Math.max(save.best, score); save.level = Math.max(save.level, levelData.level + 1); persist();
-  $('#result-title').textContent = pct >= 100 ? 'PERFECT SMASH!' : pct > 85 ? 'TOTAL MAYHEM!' : pct > 55 ? 'CRUSHED IT!' : 'NICE HIT!'; $('#result-destroy').textContent = `${pct}%`; $('#result-balls').textContent = ballCount; $('#result-coins').textContent = coins; $('#result-score').textContent = score.toLocaleString(); $('#result-ring').style.setProperty('--pct', pct);
-  setTimeout(() => setState('results'), 450); sound('victory'); haptic([60, 50, 80]); track('level_complete', { level: levelData.level, score, destruction: pct, coins });
+  $('#result-title').textContent = pct >= 100 ? 'PERFECT SMASH!' : isBest ? 'NEW BEST!' : pct > 85 ? 'TOTAL MAYHEM!' : pct > 55 ? 'CRUSHED IT!' : 'NICE HIT!'; $('#result-destroy').textContent = `${pct}%`; $('#result-balls').textContent = ballCount; $('#result-coins').textContent = coins; $('#result-score').textContent = score.toLocaleString(); $('#result-best').textContent = save.best.toLocaleString(); $('#result-ring').style.setProperty('--pct', pct); $('#next-btn').innerHTML = 'NEXT LEVEL <span>›</span>';
+  setTimeout(() => setState('results'), 360); sound('victory'); haptic([60, 50, 80]); track('level_completed', { level: levelData.level, duration_seconds:Math.max(1, Math.round((performance.now() - levelStartedAt) / 1000)), score, destruction: pct, coins });
 }
 
 function particleMaterial(color) {
@@ -498,7 +508,7 @@ function celebratePerfect() {
 function setProgress(p) { const pct = p * 100; $('#progress-fill').style.width = `${pct}%`; $('#progress-dot').style.left = `${pct}%`; }
 function updateHud() { $('#ball-count').textContent = ballCount; $('#hud-level').textContent = levelData?.level || save.level; }
 function updateMenu() { $('#menu-level').textContent = save.level; $('#menu-coins').textContent = save.coins; $('#menu-best').textContent = save.best.toLocaleString(); $('#shop-coins').textContent = save.coins; updateSettings(); }
-function setState(next) { state = next; shell.dataset.state = next; Object.values(ui).forEach(x => x.classList.remove('active')); if (ui[next]) ui[next].classList.add('active'); if (['running','aiming','firing'].includes(next)) ui.hud.classList.add('active'); const hideLevel = ['menu','shop','settings'].includes(next); if (runGroup) runGroup.visible = !hideLevel; if (towerGroup) towerGroup.visible = !hideLevel; if (next === 'menu') updateMenu(); }
+function setState(next) { state = next; shell.dataset.state = next; Object.values(ui).forEach(x => x.classList.remove('active')); if (ui[next]) ui[next].classList.add('active'); if (['running','aiming','firing'].includes(next)) ui.hud.classList.add('active'); const hideLevel = ['menu','shop','settings'].includes(next); if (runGroup) runGroup.visible = !hideLevel; if (towerGroup) towerGroup.visible = !hideLevel; const guide = $('#install-guide'); if (guide && next !== 'menu') guide.hidden = true; if (next === 'menu') { updateMenu(); maybeShowInstallGuide(450); } }
 
 function renderShop() {
   const list = $('#cosmetic-list'); list.innerHTML = '';
@@ -540,7 +550,10 @@ shell.addEventListener('pointermove', e => {
   if (!pointer.down || (pointer.id !== null && e.pointerId !== pointer.id)) return;
   e.preventDefault(); const p = pointerPos(e), dx = p.x - pointer.x, totalX = p.x - pointer.startX, totalY = p.y - pointer.startY;
   pointer.x = p.x; pointer.y = p.y; pointer.moved ||= Math.hypot(totalX, totalY) > .035;
-  if (state === 'running') targetX = clamp(targetX + dx * 6.35, -4.1, 4.1);
+  if (state === 'running') {
+    targetX = clamp(targetX + dx * 6.35, -4.1, 4.1);
+    if (!save.tutorialSeen && Math.abs(totalX) > .12) { save.tutorialSeen = true; persist(); $('#tutorial-hint')?.classList.remove('show'); }
+  }
   if (state === 'aiming') updateAimFromPointer(p);
 });
 shell.addEventListener('pointerup', e => {
@@ -550,7 +563,7 @@ shell.addEventListener('pointerup', e => {
 shell.addEventListener('pointercancel', () => { pointer.down = false; pointer.id = null; $('#aim-reticle').classList.remove('dragging'); });
 window.addEventListener('keydown', e => { if (state === 'running') { if (e.key === 'ArrowLeft' || e.key === 'a') targetX -= 1.2; if (e.key === 'ArrowRight' || e.key === 'd') targetX += 1.2; } if (state === 'aiming' && e.key === ' ') fireVolley(); });
 
-$('#play-btn').onclick = () => { track('play_clicked', { level:save.level }); createLevel(save.level); };
+$('#play-btn').onclick = () => { track('play_clicked', { level:save.level }); if (!gameStarted) { gameStarted = true; track('game_started', { level:save.level }); } createLevel(save.level); };
 $('#launch-btn').onclick = () => { if (state === 'aiming') fireVolley(); };
 $('#pause-btn').onclick = () => { if (state === 'running') { state = nextState(state,'PAUSE'); setState('pause'); } };
 $('#resume-btn').onclick = () => { state = nextState(state,'RESUME'); setState('running'); };
@@ -559,8 +572,22 @@ $('#settings-btn').onclick = () => setState('settings'); $('#close-settings').on
 $('#sound-setting').onclick = () => { save.muted = !save.muted; persist(); updateSettings(); if (!save.muted) sound('coin'); };
 $('#haptics-setting').onclick = () => { save.haptics = save.haptics === false; persist(); updateSettings(); haptic(28); };
 $('#graphics-setting').onclick = () => { const modes = ['auto','high','medium','low'], next = modes[(modes.indexOf(save.graphics) + 1) % modes.length]; save.graphics = next; persist(); applyQuality(next === 'auto' ? detectedQuality : next); haptic(20); };
-$('#next-btn').onclick = () => createLevel(levelData.level + 1); $('#replay-btn').onclick = () => createLevel(levelData.level, true); $$('[data-home]').forEach(b => b.onclick = () => setState('menu'));
-$('#share-btn').onclick = async () => { const pct = Math.round(destroyed / blocks.length * 100); const text = `I destroyed ${pct}% of the tower on level ${levelData.level} in CHAIN RUSH. Can you beat me?`; try { if (navigator.share) await navigator.share({ title:'CHAIN RUSH', text, url:location.href }); else { await navigator.clipboard.writeText(`${text} ${location.href}`); showToast('COPIED!', true); } } catch {} };
+$('#next-btn').onclick = () => createLevel(lastRunFailed ? levelData.level : levelData.level + 1, lastRunFailed); $('#replay-btn').onclick = () => createLevel(levelData.level, true); $$('[data-home]').forEach(b => b.onclick = () => setState('menu'));
+$('#share-btn').onclick = async () => { const pct = Math.round(destroyed / Math.max(1, blocks.length) * 100), url = new URL('https://chain-rush-ten.vercel.app/'); url.searchParams.set('utm_source','player_share'); url.searchParams.set('utm_medium','challenge'); url.searchParams.set('challenge',String(pct)); url.searchParams.set('level',String(levelData.level)); const text = `I got ${pct}% destruction in CHAIN RUSH on level ${levelData.level}. Can you beat me?`; try { if (navigator.share) await navigator.share({ title:'CHAIN RUSH Challenge', text, url:url.toString() }); else { await navigator.clipboard.writeText(`${text} ${url}`); showToast('CHALLENGE COPIED!', true); } track('challenge_shared', { level:levelData.level, destruction:pct }); } catch {} };
+
+function initInstallGuide() {
+  const guide = $('#install-guide'); let dismissed = false; try { dismissed = localStorage.getItem('chainRushInstallGuideDismissed') === '1'; } catch {}
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  installGuideEligible = Boolean(guide && ios && !standalone && !dismissed); if (!installGuideEligible) return;
+  maybeShowInstallGuide(1800);
+  ['#analytics-allow','#analytics-decline','#privacy-close'].forEach(selector => $(selector)?.addEventListener('click', () => maybeShowInstallGuide(350)));
+  $('#install-guide-close').onclick = () => { guide.hidden = true; installGuideEligible = false; try { localStorage.setItem('chainRushInstallGuideDismissed','1'); } catch {} };
+}
+
+function maybeShowInstallGuide(delay = 0) {
+  if (!installGuideEligible) return;
+  setTimeout(() => { const guide = $('#install-guide'); if (guide && state === 'menu' && !$('#privacy-consent')?.classList.contains('show')) guide.hidden = false; }, delay);
+}
 
 function resize() { const w = shell.clientWidth, h = shell.clientHeight; renderer.setSize(w,h,false); camera.aspect = w/h; camera.fov = h/w > 1.9 ? 58 : 54; camera.updateProjectionMatrix(); }
 window.addEventListener('resize', resize); resize();
@@ -581,4 +608,4 @@ function animate(rafTime = 0) {
   if (frameMetrics.elapsed >= 2) { const measuredFps = Math.round(frameMetrics.frames / frameMetrics.elapsed), sorted = [...frameMetrics.samples].sort((a,b) => a-b); shell.dataset.fps = measuredFps; shell.dataset.frameP95 = (sorted[Math.floor(sorted.length * .95)] || 0).toFixed(1); shell.dataset.frameMax = Math.max(...frameMetrics.samples, 0).toFixed(1); shell.dataset.drawCalls = renderer.info.render.calls; shell.dataset.triangles = renderer.info.render.triangles; if (save.graphics === 'auto' && state === 'running') { autoTuneElapsed += frameMetrics.elapsed; autoTuneFrames += frameMetrics.frames; if (autoTuneElapsed >= 6) { const average = autoTuneFrames / autoTuneElapsed; if (average < 44 && quality !== 'low') { const from = quality, to = quality === 'high' ? 'medium' : 'low'; applyQuality(to); analytics.reportPerformance({ fps:average, quality:from, issue:`auto_downgrade_to_${to}` }); } autoTuneElapsed = 0; autoTuneFrames = 0; } } frameMetrics.elapsed = 0; frameMetrics.frames = 0; }
 }
 
-$('#loading-status').textContent = 'BUILDING SCENE'; createEnvironment(); runGroup = new THREE.Group(); world.add(runGroup); levelData = makeLevel(save.level); ballCount = levelData.startBalls; cosmeticMaterial(); updateMenu(); setState('menu'); applyQuality(quality); renderer.render(scene,camera); firstFrameRendered = true; shell.dataset.bootMs = Math.round(performance.now() - bootStartedAt); analytics.reportLoad(Number(shell.dataset.bootMs)); hideLoading(); animate();
+$('#loading-status').textContent = 'BUILDING SCENE'; createEnvironment(); runGroup = new THREE.Group(); world.add(runGroup); levelData = makeLevel(save.level); ballCount = levelData.startBalls; cosmeticMaterial(); updateMenu(); setState('menu'); applyQuality(quality); renderer.render(scene,camera); firstFrameRendered = true; shell.dataset.bootMs = Math.round(performance.now() - bootStartedAt); analytics.reportLoad(Number(shell.dataset.bootMs)); hideLoading(); initInstallGuide(); animate();

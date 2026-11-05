@@ -38,8 +38,15 @@ test('difficulty grows in bounded tiers with sensible level durations', () => {
     assert.ok(tuning.speed <= 13.8);
     assert.ok(tuning.trackLength >= previous.trackLength);
     const seconds = tuning.trackLength / tuning.speed;
-    assert.ok(seconds >= 18 && seconds <= 34);
+    assert.ok(seconds >= 18 && seconds <= 28);
     previous = tuning;
+  }
+});
+
+test('obstacles stay readable and do not overlap gate decisions', () => {
+  for (let level = 1; level <= 100; level++) {
+    const data = makeLevel(level);
+    for (const obstacle of data.obstacles) for (const gate of data.gates) assert.ok(Math.abs(obstacle.z - gate.z) >= 6.5, `level ${level} gate and obstacle overlap`);
   }
 });
 
@@ -119,8 +126,24 @@ test('analytics is opt-in and exposes a reversible privacy control', async () =>
   const analytics = await readFile(new URL('../dist/js/analytics.js', import.meta.url), 'utf8');
   const html = await readFile(new URL('../dist/index.html', import.meta.url), 'utf8');
   assert.match(analytics, /consent !== 'granted'/);
-  assert.match(analytics, /va-disable/);
-  assert.match(analytics, /_vercel\/insights\/script\.js/);
+  assert.match(analytics, /ga-disable-/);
+  assert.match(analytics, /googletagmanager\.com\/gtag\/js/);
+  assert.match(analytics, /G-DDJ5VFPKPK/);
+  assert.doesNotMatch(analytics, /G-REPLACE_ME/);
+  assert.match(analytics, /ad_storage:'denied'/);
+  assert.match(analytics, /clearAnalyticsCookies/);
   assert.match(html, /id="privacy-setting"/);
   assert.match(html, /id="analytics-decline"/);
+});
+
+test('launch retention features use real results and dismissible install guidance', async () => {
+  const game = await readFile(new URL('../dist/js/game.js', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../dist/index.html', import.meta.url), 'utf8');
+  assert.match(game, /game_started/);
+  assert.match(game, /level_started/);
+  assert.match(game, /level_completed/);
+  assert.match(game, /level_failed/);
+  assert.match(game, /challenge_shared/);
+  assert.match(html, /id="install-guide"/);
+  assert.match(html, /id="tutorial-hint"/);
 });

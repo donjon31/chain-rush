@@ -19,7 +19,7 @@ Open the dev URL in a browser. Touch, mouse, and keyboard controls are supported
 - `dist/index.html` and `dist/styles.css`: portrait game shell and responsive HUD.
 - `tests/`: Node tests for modifiers, state transitions, level validity, and scoring.
 
-Progression and cosmetic ownership are stored in `localStorage`. Extension hooks for analytics, rewarded ads, purchases, and ad removal are intentionally inert until real providers are connected.
+Progression and cosmetic ownership are stored in `localStorage`. Consent-gated GA4 analytics is connected for privacy-conscious gameplay and performance measurement. Rewarded ads, purchases, and ad removal remain inert until real providers are connected.
 
 ## Current limitations
 

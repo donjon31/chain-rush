@@ -52,10 +52,10 @@ export function nextState(state, event) {
 export function levelTuning(index) {
   const level = Math.max(1, Math.floor(index));
   if (level <= 5) return { speed: 8.8 + (level - 1) * .18, trackLength: 170 + (level - 1) * 6, gateCount: 5, obstacleCount: 4 + Math.floor((level - 1) / 2) };
-  if (level <= 15) return { speed: 9.8 + (level - 6) * .12, trackLength: 215 + (level - 6) * 5, gateCount: 6, obstacleCount: 6 + Math.floor((level - 6) / 4) };
-  if (level <= 30) return { speed: 10.9 + (level - 16) * .08, trackLength: 275 + (level - 16) * 4, gateCount: 7, obstacleCount: 8 + Math.floor((level - 16) / 6) };
-  if (level <= 50) return { speed: 12.1 + (level - 31) * .045, trackLength: 340 + (level - 31) * 2, gateCount: 8, obstacleCount: 10 };
-  return { speed: Math.min(13.8, 13 + (level - 51) * .025), trackLength: 390 + Math.min(40, (level - 51) * 1.5), gateCount: 8 + (level % 3 === 0 ? 1 : 0), obstacleCount: 11 };
+  if (level <= 15) return { speed: 9.8 + (level - 6) * .12, trackLength: 195 + (level - 6) * 4, gateCount: 6, obstacleCount: 6 + Math.floor((level - 6) / 4) };
+  if (level <= 30) return { speed: 10.9 + (level - 16) * .08, trackLength: 235 + (level - 16) * 3.2, gateCount: 7, obstacleCount: 8 + Math.floor((level - 16) / 6) };
+  if (level <= 50) return { speed: 12.1 + (level - 31) * .045, trackLength: 285 + (level - 31) * 2.5, gateCount: 8, obstacleCount: 10 };
+  return { speed: Math.min(13.8, 13 + (level - 51) * .025), trackLength: 338 + Math.min(40, (level - 51) * 1.2), gateCount: 8 + (level % 3 === 0 ? 1 : 0), obstacleCount: 11 };
 }
 
 export function destructionPotential({ balls, aimX, aimY, maxX, maxY }) {
@@ -95,11 +95,24 @@ export function makeLevel(index) {
   if (level >= 6) obstacleTypes.push('laser');
   if (level >= 8) obstacleTypes.push('crusher');
   if (level >= 10) obstacleTypes.push('risk');
+  const finishZ = 4 - tuning.trackLength;
+  const obstaclePositions = [];
   const obstacles = Array.from({ length: tuning.obstacleCount }, (_, i) => {
     const distance = 55 + i * (tuning.trackLength - 105) / Math.max(1, tuning.obstacleCount - 1);
     const type = obstacleTypes[(level + i) % obstacleTypes.length];
+    const baseZ = 4 - distance;
+    const minZ = finishZ + 12, maxZ = -43;
+    const offsets = [0,-8,8,-12,12,-16,16,-20,20,-24,24];
+    let z = Math.max(minZ, Math.min(maxZ, baseZ));
+    for (const offset of offsets) {
+      const candidate = Math.max(minZ, Math.min(maxZ, baseZ + offset));
+      const gateConflict = gates.some(gate => Math.abs(gate.z - candidate) < 6.5);
+      const obstacleConflict = obstaclePositions.some(otherZ => Math.abs(otherZ - candidate) < 7.5);
+      if (!gateConflict && !obstacleConflict) { z = candidate; break; }
+    }
+    obstaclePositions.push(z);
     return {
-      z: 4 - distance,
+      z,
       type,
       x: (deterministic(level, i, 2) * 2 - 1) * 2.45,
       speed: .72 + Math.min(.9, level * .012) + deterministic(level, i, 3) * .28,
@@ -108,7 +121,6 @@ export function makeLevel(index) {
       bonus: Math.min(50, 12 + level * 2)
     };
   });
-  const finishZ = 4 - tuning.trackLength;
   return {
     level,
     startBalls: 12 + ((level - 1) % 5) * 3,
