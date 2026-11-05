@@ -131,6 +131,7 @@ test('analytics is opt-in and exposes a reversible privacy control', async () =>
   assert.match(analytics, /G-DDJ5VFPKPK/);
   assert.doesNotMatch(analytics, /G-REPLACE_ME/);
   assert.match(analytics, /ad_storage:'denied'/);
+  assert.match(analytics, /scriptLoaded[\s\S]*consent', 'update'[\s\S]*analytics_storage:'granted'/);
   assert.match(analytics, /clearAnalyticsCookies/);
   assert.match(html, /id="privacy-setting"/);
   assert.match(html, /id="analytics-decline"/);

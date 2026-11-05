@@ -27,8 +27,13 @@ function injectGoogleTag() {
 }
 
 function loadProvider() {
-  if (scriptLoaded || consent !== 'granted' || !configured()) return; scriptLoaded = true;
+  if (consent !== 'granted' || !configured()) return;
   window[`ga-disable-${MEASUREMENT_ID}`] = false;
+  if (scriptLoaded) {
+    gtag('consent', 'update', { analytics_storage:'granted', ad_storage:'denied', ad_user_data:'denied', ad_personalization:'denied' });
+    return;
+  }
+  scriptLoaded = true;
   gtag('consent', 'default', { analytics_storage:'granted', ad_storage:'denied', ad_user_data:'denied', ad_personalization:'denied', wait_for_update:500 });
   gtag('js', new Date());
   gtag('config', MEASUREMENT_ID, {
